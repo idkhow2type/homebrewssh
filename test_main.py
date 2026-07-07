@@ -1,9 +1,9 @@
-import socket
 from dataclasses import dataclass
 from io import BytesIO
 import unittest
 
-from main import NameList, Packet, Payload, consume_until
+from packet import AlgoExchange, NameList, Packet, Payload
+from stream_readers import consume_until
 from trie import Trie
 
 
@@ -28,35 +28,23 @@ class TrieTests(unittest.TestCase):
 
 class ConsumeUntilTests(unittest.TestCase):
     def test_stops_before_sentinel(self):
-        left, right = socket.socketpair()
-        self.addCleanup(left.close)
-        self.addCleanup(right.close)
+        stream = BytesIO(b"bbab")
 
-        right.sendall(b"bbab")
-
-        consumed, marker = consume_until(left, [b"bab"])
+        consumed, marker = consume_until(stream, [b"bab"])
         self.assertEqual(consumed, b"b")
         self.assertEqual(marker, b"bab")
 
     def test_multiple_end_marker(self):
-        left, right = socket.socketpair()
-        self.addCleanup(left.close)
-        self.addCleanup(right.close)
+        stream = BytesIO(b"comment \r\n")
 
-        right.sendall(b"comment \r\n")
-
-        consumed, marker = consume_until(left, [b" ", b"\r\n"])
+        consumed, marker = consume_until(stream, [b" ", b"\r\n"])
         self.assertEqual(consumed, b"comment")
         self.assertEqual(marker, b" ")
 
     def test_multiple_end_marker_partial_match(self):
-        left, right = socket.socketpair()
-        self.addCleanup(left.close)
-        self.addCleanup(right.close)
+        stream = BytesIO(b"commenta\r\n")
 
-        right.sendall(b"commenta\r\n")
-
-        consumed, marker = consume_until(left, [b"ab", b"\r\n"])
+        consumed, marker = consume_until(stream, [b"ab", b"\r\n"])
         self.assertEqual(consumed, b"commenta")
         self.assertEqual(marker, b"\r\n")
 
@@ -111,6 +99,33 @@ class PacketTests(unittest.TestCase):
         self.assertEqual(restored.payload, payload)
         self.assertEqual(restored.random_padding, packet.random_padding)
         self.assertEqual(restored.mac, packet.mac)
+        self.assertEqual(restored.to_bytes(), raw)
+
+    def test_algo_exchange_round_trip(self):
+        def nlist(*names: bytes) -> NameList:
+            raw_names = b",".join(names)
+            return NameList(len(raw_names), list(names))
+
+        payload = AlgoExchange(
+            SSH_MSG_KEXINIT=20,
+            cookie=b"0123456789abcdef",
+            kex_algorithms=nlist(b"curve25519-sha256"),
+            server_host_key_algorithms=nlist(b"ssh-ed25519"),
+            encryption_algorithms_client_to_server=nlist(b"aes128-ctr", b"aes256-ctr"),
+            encryption_algorithms_server_to_client=nlist(b"aes128-ctr", b"aes256-ctr"),
+            mac_algorithms_client_to_server=nlist(b"hmac-sha2-256"),
+            mac_algorithms_server_to_client=nlist(b"hmac-sha2-256"),
+            compression_algorithms_client_to_server=nlist(b"none"),
+            compression_algorithms_server_to_client=nlist(b"none"),
+            languages_client_to_server=nlist(b"en-US"),
+            languages_server_to_client=nlist(b"en-US"),
+            first_kex_packet_follows=True,
+        )
+
+        raw = payload.to_bytes()
+        restored = AlgoExchange.from_stream(BytesIO(raw))
+
+        self.assertEqual(restored, payload)
         self.assertEqual(restored.to_bytes(), raw)
 
 
