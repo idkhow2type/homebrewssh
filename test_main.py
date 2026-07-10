@@ -68,6 +68,10 @@ class DummyPayload(Payload):
             + self.body
         )
 
+    @classmethod
+    def build(cls, *args, **kwargs) -> "DummyPayload":
+        return super().build(*args, **kwargs)
+
 
 class PacketTests(unittest.TestCase):
     def test_name_list_round_trip(self):
@@ -107,7 +111,6 @@ class PacketTests(unittest.TestCase):
             return NameList(len(raw_names), list(names))
 
         payload = AlgoExchange(
-            SSH_MSG_KEXINIT=20,
             cookie=b"0123456789abcdef",
             kex_algorithms=nlist(b"curve25519-sha256"),
             server_host_key_algorithms=nlist(b"ssh-ed25519"),
@@ -127,6 +130,13 @@ class PacketTests(unittest.TestCase):
 
         self.assertEqual(restored, payload)
         self.assertEqual(restored.to_bytes(), raw)
+
+    def test_build_algo_exchange(self):
+        payload = AlgoExchange.build()
+        self.assertEqual(
+            payload.to_bytes(),
+            AlgoExchange.from_stream(BytesIO(payload.to_bytes())).to_bytes(),
+        )
 
 
 if __name__ == "__main__":

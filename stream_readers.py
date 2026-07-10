@@ -36,5 +36,4 @@ def consume_until(s: IO[bytes], end: bytes | list[bytes] | Trie) -> tuple[bytes,
 
 
 def require(s: IO[bytes], pref: bytes):
-    # asserts the next bytes in the socket match pref
     assert s.read(len(pref)) == pref

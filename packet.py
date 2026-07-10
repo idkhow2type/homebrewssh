@@ -1,6 +1,16 @@
 from typing import cast, Self, IO
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from enum import Enum
+
+import secrets
+from stream_readers import require
+import algorithms as algos
+
+
+class MessageNumbers(bytes, Enum):
+    SSH_MSG_KEXINIT = bytes([20])
+
 
 @dataclass
 class StructuredBytes(ABC):
@@ -11,6 +21,11 @@ class StructuredBytes(ABC):
 
     @abstractmethod
     def to_bytes(self) -> bytes:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def build(cls, *args, **kwargs) -> Self:
         pass
 
     def __add__(self, other: "StructuredBytes | bytes") -> bytes:
@@ -50,13 +65,27 @@ class Packet[T: Payload](StructuredBytes):
         mac = stream.read(mac_length)
         return Packet(packet_length, padding_length, payload, random_padding, mac)
 
-    def to_bytes(self) -> bytes:
+    def to_bytes(self, include_mac=True) -> bytes:
         return (
             self.packet_length.to_bytes(4, "big")
             + self.padding_length.to_bytes(1, "big")
             + self.payload.to_bytes()
             + self.random_padding
-            + self.mac
+            + (self.mac if include_mac else bytes())
+        )
+
+    @classmethod
+    def build[U: Payload](cls, payload: U) -> "Packet[U]":
+        # TODO: store structuredbytes size instead of doing this
+        payload_length = len(payload.to_bytes())
+        padding_length = (8 - (4 + 1 + payload_length) % 8) % 8
+        packet_length = 1 + payload_length + padding_length
+        return Packet(
+            packet_length,
+            padding_length,
+            payload,
+            secrets.token_bytes(padding_length),
+            bytes(),
         )
 
 
@@ -74,10 +103,14 @@ class NameList(StructuredBytes):
     def to_bytes(self) -> bytes:
         return self.length.to_bytes(4, "big") + b",".join(self.names)
 
+    @classmethod
+    def build(cls, names: list[bytes]) -> "NameList":
+        data = b",".join(names)
+        return NameList(len(data), names)
+
 
 @dataclass
 class AlgoExchange(Payload):
-    SSH_MSG_KEXINIT: int
     cookie: bytes
     kex_algorithms: NameList
     server_host_key_algorithms: NameList
@@ -93,8 +126,8 @@ class AlgoExchange(Payload):
 
     @classmethod
     def from_stream(cls, stream: IO[bytes]) -> "AlgoExchange":
+        require(stream, MessageNumbers.SSH_MSG_KEXINIT)
         return AlgoExchange(
-            int.from_bytes(stream.read(1), "big"),
             stream.read(16),
             NameList.from_stream(stream),
             NameList.from_stream(stream),
@@ -111,7 +144,7 @@ class AlgoExchange(Payload):
 
     def to_bytes(self) -> bytes:
         return (
-            self.SSH_MSG_KEXINIT.to_bytes(1)
+            MessageNumbers.SSH_MSG_KEXINIT
             + self.cookie
             + self.kex_algorithms
             + self.server_host_key_algorithms
@@ -124,4 +157,21 @@ class AlgoExchange(Payload):
             + self.languages_client_to_server
             + self.languages_server_to_client
             + bytes([self.first_kex_packet_follows])
+        )
+
+    @classmethod
+    def build(cls) -> "AlgoExchange":
+        return AlgoExchange(
+            secrets.token_bytes(16),
+            NameList.build([i.proto_name for i in algos.kex.registry.values()]),
+            NameList.build([i.proto_name for i in algos.server_host_key.registry.values()]),
+            NameList.build([i.proto_name for i in algos.encryption.registry.values()]),
+            NameList.build([i.proto_name for i in algos.encryption.registry.values()]),
+            NameList.build([i.proto_name for i in algos.mac.registry.values()]),
+            NameList.build([i.proto_name for i in algos.mac.registry.values()]),
+            NameList.build([i.proto_name for i in algos.compression.registry.values()]),
+            NameList.build([i.proto_name for i in algos.compression.registry.values()]),
+            NameList.build([i.proto_name for i in algos.language.registry.values()]),
+            NameList.build([i.proto_name for i in algos.language.registry.values()]),
+            False
         )

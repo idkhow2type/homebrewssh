@@ -34,6 +34,7 @@ class Server:
 
         sock_file = self.socket.makefile("rb")
 
+        # parse header
         msg = consume_until(sock_file, b"SSH-")
         if self.verbose:
             sys.stdout.buffer.write(msg[0])
@@ -43,11 +44,19 @@ class Server:
         if end == b" ":
             # this is the comments of the header
             consume_until(sock_file, b"\r\n")
+        # send header
         self.socket.sendall(self.metadata.ident_string.encode())
-        pack = Packet.from_stream(sock_file, AlgoExchange, 0)
 
-        print(len(pack.to_bytes()), pack.packet_length)
+        # parse algo negotiation
+        client_packet = Packet.build(AlgoExchange.build())
+        self.socket.sendall(client_packet.to_bytes())
+        server_pack = Packet.from_stream(sock_file, AlgoExchange, 0)
+
+        print(len(server_pack.to_bytes()), server_pack.packet_length)
         print(self.host, self.port, self.metadata.proto_version, self.software_version)
+        # print(client_packet)
+        print(sock_file.read(1024))
+        
 
     def disconnect(self):
         # imagine having to free in a gc language
