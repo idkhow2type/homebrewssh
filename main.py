@@ -5,7 +5,7 @@ import sys
 
 from messages.packet import Packet, AlgoExchange
 from stream_readers import consume_until, require
-import algorithms
+from algorithms.collection import AlgoCollection
 
 
 @dataclass
@@ -26,10 +26,14 @@ class Server:
         self.host = host
         self.port = port
         self.metadata = metadata
-        self.socket: socket.socket | None = None
-        self.software_version: str | None = None
+        self.socket: socket.socket
+        self.software_version: str
         self.verbose = verbose
         self.ident_string = ""
+        self.I_C: bytes
+        self.I_S: bytes
+        self.exchange_hash: bytes
+        self.algorithms: AlgoCollection
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -60,8 +64,8 @@ class Server:
             )
 
             # parse algo negotiation
-            client_packet = Packet.build(AlgoExchange.build())
-            self.socket.sendall(client_packet.to_bytes())
+            client_pack = Packet.build(AlgoExchange.build())
+            self.socket.sendall(client_pack.to_bytes())
             server_pack = Packet.from_stream(sock_file, AlgoExchange, 0)
             # print(
             #     len(server_pack.to_bytes()),
@@ -70,10 +74,8 @@ class Server:
             #     client_packet.packet_length
             # )
 
-        for algo in client_packet.payload.kex_algorithms.names:
-            if algo in server_pack.payload.kex_algorithms.names:
-                algorithms.kex.registry['proto_name'][algo](self)
-                break
+        self.algorithms = AlgoCollection(client_pack.payload, server_pack.payload)
+        self.algorithms.kex_algorithms(self)
 
     def disconnect(self):
         # imagine having to free in a gc language

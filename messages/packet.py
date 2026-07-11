@@ -4,7 +4,7 @@ from typing import IO
 import secrets
 
 from stream_readers import require
-from .primitives import StructuredBytes, NameList, MessageNumbers, Mpint
+from .primitives import *
 import algorithms as algos
 
 
@@ -56,23 +56,6 @@ class Packet[T: Payload](StructuredBytes):
             secrets.token_bytes(padding_length),
             bytes(),
         )
-
-
-@dataclass
-class KexDHInit(Payload):
-    e: int
-
-    @classmethod
-    def from_stream(cls, stream: IO[bytes], *args, **kwargs) -> KexDHInit:
-        # the client shouldn't need to read this from stream
-        return NotImplemented
-
-    def to_bytes(self) -> bytes:
-        return bytes([30]) + Mpint.build(self.e).to_bytes()
-
-    @classmethod
-    def build(cls, e: int) -> KexDHInit:
-        return KexDHInit(e)
 
 
 @dataclass
@@ -142,3 +125,48 @@ class AlgoExchange(Payload):
             NameList.build(list(algos.language.registry["proto_name"].keys())),
             False,
         )
+
+
+@dataclass
+class KexDHInit(Payload):
+    e: int
+
+    @classmethod
+    def from_stream(cls, stream: IO[bytes], *args, **kwargs) -> KexDHInit:
+        # the client shouldn't need to read this from stream
+        return NotImplemented
+
+    def to_bytes(self) -> bytes:
+        return MessageNumbers.SSH_MSG_KEXDH_INIT + Mpint.build(self.e).to_bytes()
+
+    @classmethod
+    def build(cls, e: int) -> KexDHInit:
+        return KexDHInit(e)
+
+
+@dataclass
+class KexDHReply(Payload):
+    public_key_cert: String
+    f: Mpint
+    exchange_signature: String
+
+    @classmethod
+    def from_stream(cls, stream: IO[bytes]) -> KexDHReply:
+        require(stream, MessageNumbers.SSH_MSG_KEXDH_REPLY)
+        return KexDHReply(
+            String.from_stream(stream),
+            Mpint.from_stream(stream),
+            String.from_stream(stream),
+        )
+
+    def to_bytes(self) -> bytes:
+        return (
+            MessageNumbers.SSH_MSG_KEXDH_REPLY
+            + self.public_key_cert
+            + self.f
+            + self.exchange_signature
+        )
+
+    @classmethod
+    def build(cls, *args, **kwargs) -> Self:
+        return super().build(*args, **kwargs)

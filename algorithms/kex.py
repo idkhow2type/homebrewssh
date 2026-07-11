@@ -40,8 +40,7 @@ def pow_mod(g, x, p: int):
 
 @registry.register(Metadata(proto_name=b"diffie-hellman-group14-sha256"))
 def dh_g14_sha256(server: Server):
-    from messages.packet import KexDHInit, Packet
-    from messages.primitives import Mpint
+    from messages.packet import KexDHInit, Packet, KexDHReply
 
     assert server.socket
     with server.socket.makefile("rb") as sock_file:
@@ -54,4 +53,7 @@ def dh_g14_sha256(server: Server):
         e = pow_mod(g, x, p)
 
         server.socket.sendall(Packet.build(KexDHInit.build(e)).to_bytes())
-        print(sock_file.read(1024))
+        
+        s_pack=Packet.from_stream(sock_file,KexDHReply,0)
+
+        print(s_pack)

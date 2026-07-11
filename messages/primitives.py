@@ -3,11 +3,11 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum
 
-from io import BytesIO
-
 
 class MessageNumbers(bytes, Enum):
     SSH_MSG_KEXINIT = bytes([20])
+    SSH_MSG_KEXDH_INIT = bytes([30])
+    SSH_MSG_KEXDH_REPLY = bytes([31])
 
 
 @dataclass
