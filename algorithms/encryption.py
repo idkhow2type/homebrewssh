@@ -21,6 +21,6 @@ class Algorithm(InputFunc, Metadata):
 registry: Registry[InputFunc, Algorithm, Metadata] = Registry()
 
 
-@registry.register(Metadata(proto_name=b"3des-cbc"))
-def des_cbc3(data: bytes) -> bytes:
+@registry.register(Metadata(proto_name=b"aes128-ctr"))
+def aes128_ctr(data: bytes) -> bytes:
     return data

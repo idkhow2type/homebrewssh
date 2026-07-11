@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import unittest
 
-from packet import AlgoExchange, NameList, Packet, Payload
+from messages.primitives import AlgoExchange, NameList, Packet, Payload
 from stream_readers import consume_until
 from trie import Trie
 

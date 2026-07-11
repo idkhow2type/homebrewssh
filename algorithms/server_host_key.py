@@ -21,6 +21,6 @@ class Algorithm(InputFunc, Metadata):
 registry: Registry[InputFunc, Algorithm, Metadata] = Registry()
 
 
-@registry.register(Metadata(proto_name=b"ssh-dss"))
-def ssh_dss(data: bytes) -> bytes:
+@registry.register(Metadata(proto_name=b"rsa-sha2-256"))
+def rsa_sha2_256(data: bytes) -> bytes:
     return data

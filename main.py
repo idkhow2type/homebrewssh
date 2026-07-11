@@ -3,7 +3,7 @@ import socket
 from io import BytesIO
 import sys
 
-from packet import Packet, AlgoExchange
+from messages.packet import Packet, AlgoExchange
 from stream_readers import consume_until, require
 import algorithms
 
@@ -63,15 +63,14 @@ class Server:
             client_packet = Packet.build(AlgoExchange.build())
             self.socket.sendall(client_packet.to_bytes())
             server_pack = Packet.from_stream(sock_file, AlgoExchange, 0)
-            print(
-                len(server_pack.to_bytes()),
-                server_pack.packet_length,
-                len(client_packet.to_bytes()),
-            )
+            # print(
+            #     len(server_pack.to_bytes()),
+            #     server_pack.packet_length,
+            #     len(client_packet.to_bytes()),
+            #     client_packet.packet_length
+            # )
 
-        # print(server_pack.payload.kex_algorithms.names)
         for algo in client_packet.payload.kex_algorithms.names:
-            print(algo,algo in server_pack.payload.kex_algorithms.names)
             if algo in server_pack.payload.kex_algorithms.names:
                 algorithms.kex.registry['proto_name'][algo](self)
                 break

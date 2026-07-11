@@ -1,60 +1,11 @@
-from typing import cast, Self, IO
+from abc import ABC
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from enum import Enum
-
+from typing import IO
 import secrets
+
 from stream_readers import require
+from .primitives import StructuredBytes, NameList, MessageNumbers, Mpint
 import algorithms as algos
-
-
-class MessageNumbers(bytes, Enum):
-    SSH_MSG_KEXINIT = bytes([20])
-
-
-@dataclass
-class StructuredBytes(ABC):
-    @classmethod
-    @abstractmethod
-    def from_stream(cls, stream: IO[bytes], *args, **kwargs) -> Self:
-        pass
-
-    @abstractmethod
-    def to_bytes(self) -> bytes:
-        pass
-
-    @classmethod
-    @abstractmethod
-    def build(cls, *args, **kwargs) -> Self:
-        pass
-
-    def __add__(self, other: "StructuredBytes | bytes") -> bytes:
-        return self.to_bytes() + (
-            other.to_bytes() if isinstance(other, StructuredBytes) else other
-        )
-
-    def __radd__(self, other: "StructuredBytes | bytes") -> bytes:
-        return (
-            other.to_bytes()
-            if isinstance(other, StructuredBytes)
-            else cast(bytes, other)  # not very nice but we trust ourselves
-        ) + self.to_bytes()
-
-
-@dataclass
-class Mpint(StructuredBytes):
-    num: int
-
-    @classmethod
-    def from_stream(cls, stream: IO[bytes], byte_count: int) -> "Mpint":
-        return Mpint(int.from_bytes(stream.read(byte_count)))
-
-    def to_bytes(self) -> bytes:
-        return self.num.to_bytes((self.num.bit_length() + 7) // 8)
-
-    @classmethod
-    def build(cls, num: int) -> "Mpint":
-        return Mpint(num)
 
 
 @dataclass
@@ -108,23 +59,20 @@ class Packet[T: Payload](StructuredBytes):
 
 
 @dataclass
-class NameList(StructuredBytes):
-    length: int
-    names: list[bytes]
+class KexDHInit(Payload):
+    e: int
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> "NameList":
-        length = int.from_bytes(stream.read(4), "big")
-        names = stream.read(length).split(b",")
-        return NameList(length, names)
+    def from_stream(cls, stream: IO[bytes], *args, **kwargs) -> KexDHInit:
+        # the client shouldn't need to read this from stream
+        return NotImplemented
 
     def to_bytes(self) -> bytes:
-        return self.length.to_bytes(4, "big") + b",".join(self.names)
+        return bytes([30]) + Mpint.build(self.e).to_bytes()
 
     @classmethod
-    def build(cls, names: list[bytes]) -> "NameList":
-        data = b",".join(names)
-        return NameList(len(data), names)
+    def build(cls, e: int) -> KexDHInit:
+        return KexDHInit(e)
 
 
 @dataclass
@@ -143,7 +91,7 @@ class AlgoExchange(Payload):
     first_kex_packet_follows: bool
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> "AlgoExchange":
+    def from_stream(cls, stream: IO[bytes]) -> AlgoExchange:
         require(stream, MessageNumbers.SSH_MSG_KEXINIT)
         return AlgoExchange(
             stream.read(16),
@@ -175,10 +123,11 @@ class AlgoExchange(Payload):
             + self.languages_client_to_server
             + self.languages_server_to_client
             + bytes([self.first_kex_packet_follows])
+            + bytes([0, 0, 0, 0])  # reserved
         )
 
     @classmethod
-    def build(cls) -> "AlgoExchange":
+    def build(cls) -> AlgoExchange:
         return AlgoExchange(
             secrets.token_bytes(16),
             NameList.build(list(algos.kex.registry["proto_name"].keys())),
