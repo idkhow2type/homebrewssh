@@ -42,6 +42,22 @@ class StructuredBytes(ABC):
 
 
 @dataclass
+class Mpint(StructuredBytes):
+    num: int
+
+    @classmethod
+    def from_stream(cls, stream: IO[bytes], byte_count: int) -> "Mpint":
+        return Mpint(int.from_bytes(stream.read(byte_count)))
+
+    def to_bytes(self) -> bytes:
+        return self.num.to_bytes((self.num.bit_length() + 7) // 8)
+
+    @classmethod
+    def build(cls, num: int) -> "Mpint":
+        return Mpint(num)
+
+
+@dataclass
 class Payload(StructuredBytes, ABC):
     pass
 
@@ -79,6 +95,8 @@ class Packet[T: Payload](StructuredBytes):
         # TODO: store structuredbytes size instead of doing this
         payload_length = len(payload.to_bytes())
         padding_length = (8 - (4 + 1 + payload_length) % 8) % 8
+        if padding_length < 4:
+            padding_length += 8
         packet_length = 1 + payload_length + padding_length
         return Packet(
             packet_length,
@@ -163,15 +181,15 @@ class AlgoExchange(Payload):
     def build(cls) -> "AlgoExchange":
         return AlgoExchange(
             secrets.token_bytes(16),
-            NameList.build([i.proto_name for i in algos.kex.registry.values()]),
-            NameList.build([i.proto_name for i in algos.server_host_key.registry.values()]),
-            NameList.build([i.proto_name for i in algos.encryption.registry.values()]),
-            NameList.build([i.proto_name for i in algos.encryption.registry.values()]),
-            NameList.build([i.proto_name for i in algos.mac.registry.values()]),
-            NameList.build([i.proto_name for i in algos.mac.registry.values()]),
-            NameList.build([i.proto_name for i in algos.compression.registry.values()]),
-            NameList.build([i.proto_name for i in algos.compression.registry.values()]),
-            NameList.build([i.proto_name for i in algos.language.registry.values()]),
-            NameList.build([i.proto_name for i in algos.language.registry.values()]),
-            False
+            NameList.build(list(algos.kex.registry["proto_name"].keys())),
+            NameList.build(list(algos.server_host_key.registry["proto_name"].keys())),
+            NameList.build(list(algos.encryption.registry["proto_name"].keys())),
+            NameList.build(list(algos.encryption.registry["proto_name"].keys())),
+            NameList.build(list(algos.mac.registry["proto_name"].keys())),
+            NameList.build(list(algos.mac.registry["proto_name"].keys())),
+            NameList.build(list(algos.compression.registry["proto_name"].keys())),
+            NameList.build(list(algos.compression.registry["proto_name"].keys())),
+            NameList.build(list(algos.language.registry["proto_name"].keys())),
+            NameList.build(list(algos.language.registry["proto_name"].keys())),
+            False,
         )
