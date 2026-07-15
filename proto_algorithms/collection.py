@@ -2,20 +2,20 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from messages.packet import AlgoExchange
     from messages.primitives import NameList
-    import algorithms
+    import proto_algorithms
 
 
 class AlgoCollection:
-    kex_algorithms: algorithms.kex.Algorithm
-    server_host_key_algorithms: algorithms.server_host_key.Algorithm
-    encryption_algorithms_client_to_server: algorithms.encryption.Algorithm
-    encryption_algorithms_server_to_client: algorithms.encryption.Algorithm
-    mac_algorithms_client_to_server: algorithms.mac.Algorithm
-    mac_algorithms_server_to_client: algorithms.mac.Algorithm
-    compression_algorithms_client_to_server: algorithms.compression.Algorithm
-    compression_algorithms_server_to_client: algorithms.compression.Algorithm
-    languages_client_to_server: algorithms.language.Algorithm
-    languages_server_to_client: algorithms.language.Algorithm
+    kex_algorithms: proto_algorithms.kex.Algorithm
+    server_host_key_algorithms: proto_algorithms.server_host_key.Algorithm
+    encryption_algorithms_client_to_server: proto_algorithms.encryption.Algorithm
+    encryption_algorithms_server_to_client: proto_algorithms.encryption.Algorithm
+    mac_algorithms_client_to_server: proto_algorithms.mac.Algorithm
+    mac_algorithms_server_to_client: proto_algorithms.mac.Algorithm
+    compression_algorithms_client_to_server: proto_algorithms.compression.Algorithm
+    compression_algorithms_server_to_client: proto_algorithms.compression.Algorithm
+    languages_client_to_server: proto_algorithms.language.Algorithm
+    languages_server_to_client: proto_algorithms.language.Algorithm
 
     def __init__(
         self, client_payload: AlgoExchange, server_payload: AlgoExchange
@@ -88,7 +88,7 @@ class AlgoCollection:
         client_list: NameList,
         server_list: NameList,
     ):
-        import algorithms
+        import proto_algorithms
         for algo in client_list.names:
             if algo in server_list.names:
-                setattr(self, field, getattr(algorithms, registry).registry["proto_name"][algo])
+                setattr(self, field, getattr(proto_algorithms, registry).registry["proto_name"][algo])

@@ -8,6 +8,7 @@ class MessageNumbers(bytes, Enum):
     SSH_MSG_KEXINIT = bytes([20])
     SSH_MSG_KEXDH_INIT = bytes([30])
     SSH_MSG_KEXDH_REPLY = bytes([31])
+    SSH_MSG_NEWKEYS = bytes([21])
 
 
 @dataclass
@@ -37,6 +38,9 @@ class StructuredBytes(ABC):
             if isinstance(other, StructuredBytes)
             else cast(bytes, other)  # not very nice but we trust ourselves
         ) + self.to_bytes()
+    
+    def __bytes__(self):
+        return self.to_bytes()
 
 
 @dataclass

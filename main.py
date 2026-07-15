@@ -3,9 +3,9 @@ import socket
 from io import BytesIO
 import sys
 
-from messages.packet import Packet, AlgoExchange
+from messages.packet import Packet, AlgoExchange, Mpint, NewKeys
 from stream_readers import consume_until, require
-from algorithms.collection import AlgoCollection
+from proto_algorithms.collection import AlgoCollection
 
 
 @dataclass
@@ -15,7 +15,7 @@ class Metadata:
 
     @property
     def ident_string(self):
-        return f"SSH-{self.proto_version}-{self.software_version} \r\n"
+        return f"SSH-{self.proto_version}-{self.software_version}".encode()
 
 
 METADATA = Metadata()
@@ -29,11 +29,13 @@ class Server:
         self.socket: socket.socket
         self.software_version: str
         self.verbose = verbose
-        self.ident_string = ""
+        self.ident_string = b""
         self.I_C: bytes
         self.I_S: bytes
         self.exchange_hash: bytes
         self.algorithms: AlgoCollection
+        self.K: Mpint
+        self.H: bytes
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -44,8 +46,8 @@ class Server:
             msg = consume_until(sock_file, b"SSH-")
             if self.verbose:
                 sys.stdout.buffer.write(msg[0])
-            self.ident_string = consume_until(sock_file, b"\r\n")[0] + b"\r\n"
-            ident_file = BytesIO(self.ident_string)
+            self.ident_string = consume_until(sock_file, b"\r\n")[0]
+            ident_file = BytesIO(self.ident_string + b"\r\n")
             self.ident_string = b"SSH-" + self.ident_string
             require(ident_file, self.metadata.proto_version.encode() + b"-")
             version, end = consume_until(ident_file, [b" ", b"\r\n"])
@@ -54,19 +56,21 @@ class Server:
                 # this is the comments of the header
                 consume_until(ident_file, b"\r\n")
             # send identification string
-            self.socket.sendall(self.metadata.ident_string.encode())
-            print(
-                self.ident_string,
-                self.host,
-                self.port,
-                self.metadata.proto_version,
-                self.software_version,
-            )
+            self.socket.sendall(self.metadata.ident_string + b"\r\n")
+            # print(
+            #     self.ident_string,
+            #     self.host,
+            #     self.port,
+            #     self.metadata.proto_version,
+            #     self.software_version,
+            # )
 
-            # parse algo negotiation
+            # algo negotiation
+            server_pack = Packet.from_stream(sock_file, AlgoExchange, 0)
             client_pack = Packet.build(AlgoExchange.build())
             self.socket.sendall(client_pack.to_bytes())
-            server_pack = Packet.from_stream(sock_file, AlgoExchange, 0)
+            self.I_C = client_pack.to_bytes()
+            self.I_S = server_pack.to_bytes()
             # print(
             #     len(server_pack.to_bytes()),
             #     server_pack.packet_length,
@@ -77,6 +81,8 @@ class Server:
         self.algorithms = AlgoCollection(client_pack.payload, server_pack.payload)
         self.algorithms.kex_algorithms(self)
 
+        self.socket.sendall(Packet.build(NewKeys.build()).to_bytes())
+
     def disconnect(self):
         # imagine having to free in a gc language
         assert isinstance(self.socket, socket.socket)
@@ -84,6 +90,6 @@ class Server:
 
 
 if __name__ == "__main__":
-    server = Server("127.0.0.1")
+    server = Server("127.0.0.1", int(sys.argv[1]) if len(sys.argv) >= 2 else 22)
     server.connect()
     server.disconnect()

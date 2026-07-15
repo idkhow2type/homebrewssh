@@ -2,6 +2,8 @@ from registry import Registry
 from typing import Protocol, TYPE_CHECKING
 from dataclasses import dataclass
 import secrets
+from algorithms.hash import sha256
+from io import BytesIO
 
 if TYPE_CHECKING:
     from main import Server
@@ -25,7 +27,7 @@ class Algorithm(InputFunc, Metadata):
 registry: Registry[InputFunc, Algorithm, Metadata] = Registry()
 
 
-def pow_mod(g, x, p: int):
+def pow_mod(g: int, x: int, p: int):
     ans = 1
     b = 1 << x.bit_length()
     while b:
@@ -40,7 +42,9 @@ def pow_mod(g, x, p: int):
 
 @registry.register(Metadata(proto_name=b"diffie-hellman-group14-sha256"))
 def dh_g14_sha256(server: Server):
-    from messages.packet import KexDHInit, Packet, KexDHReply
+    from messages.packet import KexDHInit, Packet, KexDHReply, NewKeys
+    from messages.primitives import Mpint, String
+    from main import METADATA
 
     assert server.socket
     with server.socket.makefile("rb") as sock_file:
@@ -53,7 +57,18 @@ def dh_g14_sha256(server: Server):
         e = pow_mod(g, x, p)
 
         server.socket.sendall(Packet.build(KexDHInit.build(e)).to_bytes())
-        
-        s_pack=Packet.from_stream(sock_file,KexDHReply,0)
 
-        print(s_pack)
+        s_pack = Packet.from_stream(sock_file, KexDHReply, 0)
+
+        # print(METADATA.ident_string, server.ident_string)
+        K = Mpint(pow_mod(s_pack.payload.f.num, x, p))
+        server.H = sha256(
+            String.build(METADATA.ident_string)
+            + String.build(server.ident_string)
+            + String.build(server.I_C)
+            + String.build(server.I_S)
+            + s_pack.payload.public_key
+            + Mpint(e)
+            + s_pack.payload.f
+            + K
+        ).digest()

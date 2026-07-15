@@ -5,7 +5,7 @@ import secrets
 
 from stream_readers import require
 from .primitives import *
-import algorithms as algos
+import proto_algorithms as algos
 
 
 @dataclass
@@ -146,7 +146,7 @@ class KexDHInit(Payload):
 
 @dataclass
 class KexDHReply(Payload):
-    public_key_cert: String
+    public_key: String
     f: Mpint
     exchange_signature: String
 
@@ -162,7 +162,7 @@ class KexDHReply(Payload):
     def to_bytes(self) -> bytes:
         return (
             MessageNumbers.SSH_MSG_KEXDH_REPLY
-            + self.public_key_cert
+            + self.public_key
             + self.f
             + self.exchange_signature
         )
@@ -170,3 +170,17 @@ class KexDHReply(Payload):
     @classmethod
     def build(cls, *args, **kwargs) -> Self:
         return super().build(*args, **kwargs)
+
+
+# this is stupid
+class NewKeys(Payload):
+    @classmethod
+    def from_stream(cls, stream: IO[bytes]) -> NewKeys:
+        return NewKeys()
+
+    def to_bytes(self) -> bytes:
+        return MessageNumbers.SSH_MSG_NEWKEYS
+
+    @classmethod
+    def build(cls) -> NewKeys:
+        return NewKeys()
