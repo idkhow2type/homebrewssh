@@ -55,7 +55,8 @@ def dh_g14_sha256(server: Server):
     server.send(KexDHInit.build(e))
     server_payload = server.recv(KexDHReply)
 
-    # print(METADATA.ident_string, server.ident_string)
+    # TODO: check if public key is valid
+
     K = Mpint(pow_mod(server_payload.f.num, x, p))
     server.H = sha256(
         String.build(server.client_meta.ident_string)

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from messages.packet import AlgoExchange
+    from messages.packet import KexInit
     from messages.primitives import NameList
     import proto_algorithms
 
@@ -18,7 +18,7 @@ class AlgoCollection:
     languages_server_to_client: proto_algorithms.language.Algorithm
 
     def __init__(
-        self, client_payload: AlgoExchange, server_payload: AlgoExchange
+        self, client_payload: KexInit, server_payload: KexInit
     ) -> None:
         self._set(
             "kex_algorithms",

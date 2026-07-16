@@ -4,14 +4,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum
 
-
-class MessageNumbers(bytes, Enum):
-    SSH_MSG_KEXINIT = bytes([20])
-    SSH_MSG_KEXDH_INIT = bytes([30])
-    SSH_MSG_KEXDH_REPLY = bytes([31])
-    SSH_MSG_NEWKEYS = bytes([21])
-
-
+# TODO: default impl for abstract methods?
 @dataclass
 class StructuredBytes(ABC):
     @classmethod

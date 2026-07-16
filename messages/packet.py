@@ -1,15 +1,16 @@
 from abc import ABC
 from dataclasses import dataclass
+from typing import ClassVar
 from io import BufferedIOBase
 import secrets
 
-from stream_readers import require
 from .primitives import *
 import proto_algorithms as algos
 
 
 @dataclass
 class Payload(StructuredBytes, ABC):
+    CODE: ClassVar[bytes]
     pass
 
 
@@ -22,11 +23,12 @@ class Packet[T: Payload](StructuredBytes):
     mac: bytes
 
     @classmethod
-    def from_stream[U: Payload](
-        cls, stream: BufferedIOBase, payload_type: type[U], mac_length: int
-    ) -> "Packet[U]":
+    def from_stream(
+        cls, stream: BufferedIOBase, mac_length: int
+    ) -> Packet:
         packet_length = int.from_bytes(stream.read(4), "big")
         padding_length = int.from_bytes(stream.read(1), "big")
+        payload_type=PAYLOADS[stream.read(1)]
         payload = payload_type.from_stream(stream)
         random_padding = stream.read(padding_length)
         mac = stream.read(mac_length)
@@ -59,7 +61,8 @@ class Packet[T: Payload](StructuredBytes):
 
 
 @dataclass
-class AlgoExchange(Payload):
+class KexInit(Payload):
+    CODE = bytes([20])
     cookie: bytes
     kex_algorithms: NameList
     server_host_key_algorithms: NameList
@@ -74,9 +77,8 @@ class AlgoExchange(Payload):
     first_kex_packet_follows: bool
 
     @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> AlgoExchange:
-        require(stream, MessageNumbers.SSH_MSG_KEXINIT)
-        return AlgoExchange(
+    def from_stream(cls, stream: BufferedIOBase) -> KexInit:
+        return KexInit(
             stream.read(16),
             NameList.from_stream(stream),
             NameList.from_stream(stream),
@@ -93,7 +95,7 @@ class AlgoExchange(Payload):
 
     def to_bytes(self) -> bytes:
         return (
-            MessageNumbers.SSH_MSG_KEXINIT
+            self.CODE
             + self.cookie
             + self.kex_algorithms
             + self.server_host_key_algorithms
@@ -110,8 +112,8 @@ class AlgoExchange(Payload):
         )
 
     @classmethod
-    def build(cls) -> AlgoExchange:
-        return AlgoExchange(
+    def build(cls) -> KexInit:
+        return KexInit(
             secrets.token_bytes(16),
             NameList.build(list(algos.kex.registry["proto_name"].keys())),
             NameList.build(list(algos.server_host_key.registry["proto_name"].keys())),
@@ -129,6 +131,7 @@ class AlgoExchange(Payload):
 
 @dataclass
 class KexDHInit(Payload):
+    CODE = bytes([30])
     e: int
 
     @classmethod
@@ -137,7 +140,7 @@ class KexDHInit(Payload):
         return NotImplemented
 
     def to_bytes(self) -> bytes:
-        return MessageNumbers.SSH_MSG_KEXDH_INIT + Mpint.build(self.e).to_bytes()
+        return self.CODE + Mpint.build(self.e).to_bytes()
 
     @classmethod
     def build(cls, e: int) -> KexDHInit:
@@ -146,13 +149,13 @@ class KexDHInit(Payload):
 
 @dataclass
 class KexDHReply(Payload):
+    CODE = bytes([31])
     public_key: String
     f: Mpint
     exchange_signature: String
 
     @classmethod
     def from_stream(cls, stream: BufferedIOBase) -> KexDHReply:
-        require(stream, MessageNumbers.SSH_MSG_KEXDH_REPLY)
         return KexDHReply(
             String.from_stream(stream),
             Mpint.from_stream(stream),
@@ -160,27 +163,122 @@ class KexDHReply(Payload):
         )
 
     def to_bytes(self) -> bytes:
-        return (
-            MessageNumbers.SSH_MSG_KEXDH_REPLY
-            + self.public_key
-            + self.f
-            + self.exchange_signature
-        )
+        return self.CODE + self.public_key + self.f + self.exchange_signature
 
     @classmethod
     def build(cls, *args, **kwargs) -> Self:
-        return super().build(*args, **kwargs)
+        return NotImplemented
 
 
 # this is stupid
+@dataclass
 class NewKeys(Payload):
+    CODE = bytes([21])
+
     @classmethod
     def from_stream(cls, stream: BufferedIOBase) -> NewKeys:
         return NewKeys()
 
     def to_bytes(self) -> bytes:
-        return MessageNumbers.SSH_MSG_NEWKEYS
+        return self.CODE
 
     @classmethod
     def build(cls) -> NewKeys:
         return NewKeys()
+
+
+@dataclass
+class Disconnect(Payload):
+    CODE = bytes([1])
+    reason_code: int
+    description: String
+    language_tag: String
+
+    @classmethod
+    def from_stream(cls, stream: BufferedIOBase) -> Disconnect:
+        return Disconnect(
+            int.from_bytes(stream.read(4)),
+            String.from_stream(stream),
+            String.from_stream(stream),
+        )
+
+    def to_bytes(self) -> bytes:
+        return (
+            self.CODE
+            + self.reason_code.to_bytes(4)
+            + self.description.to_bytes()
+            + self.language_tag.to_bytes()
+        )
+
+    @classmethod
+    def build(
+        cls, reason_code: int, description: bytes, language_tag: bytes
+    ) -> Disconnect:
+        return Disconnect(
+            reason_code, String.build(description), String.build(language_tag)
+        )
+
+
+@dataclass
+class Ignore(Payload):
+    CODE = bytes([2])
+    data: String
+
+    @classmethod
+    def from_stream(cls, stream: BufferedIOBase) -> Ignore:
+        return Ignore(String.from_stream(stream))
+
+    def to_bytes(self) -> bytes:
+        return self.CODE + self.data.to_bytes()
+
+    @classmethod
+    def build(cls, data: bytes) -> Ignore:
+        return Ignore(String.build(data))
+
+
+@dataclass
+class Debug(Payload):
+    CODE = bytes([4])
+    always_display: bool
+    message: String
+    language_tag: String
+
+    @classmethod
+    def from_stream(cls, stream: BufferedIOBase) -> Debug:
+        return Debug(
+            bool(stream.read(1)), String.from_stream(stream), String.from_stream(stream)
+        )
+
+    def to_bytes(self) -> bytes:
+        return (
+            self.CODE
+            + self.always_display.to_bytes()
+            + self.message
+            + self.language_tag
+        )
+
+    @classmethod
+    def build(cls, always_display: bool, message: bytes, language_tag: bytes) -> Debug:
+        return Debug(always_display, String.build(message), String.build(language_tag))
+
+
+@dataclass
+class Unimplemented(Payload):
+    CODE = bytes([3])
+    sequence_number: int
+
+    @classmethod
+    def from_stream(cls, stream: BufferedIOBase) -> Unimplemented:
+        return Unimplemented(int.from_bytes(stream.read(4)))
+
+    def to_bytes(self) -> bytes:
+        return self.CODE + self.sequence_number.to_bytes(4)
+
+    @classmethod
+    def build(cls, sequence_number: int) -> Unimplemented:
+        return Unimplemented(sequence_number)
+
+
+PAYLOADS = {}
+for cls in Payload.__subclasses__():
+    PAYLOADS[cls.CODE] = cls
