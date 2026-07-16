@@ -1,4 +1,5 @@
-from typing import cast, Self, IO
+from typing import cast, Self
+from io import BufferedIOBase
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -15,7 +16,7 @@ class MessageNumbers(bytes, Enum):
 class StructuredBytes(ABC):
     @classmethod
     @abstractmethod
-    def from_stream(cls, stream: IO[bytes], *args, **kwargs) -> Self:
+    def from_stream(cls, stream: BufferedIOBase, *args, **kwargs) -> Self:
         pass
 
     @abstractmethod
@@ -49,7 +50,7 @@ class String(StructuredBytes):
     data: bytes
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> String:
+    def from_stream(cls, stream: BufferedIOBase) -> String:
         length = int.from_bytes(stream.read(4))
         return String(length, stream.read(length))
 
@@ -66,7 +67,7 @@ class Mpint(StructuredBytes):
     num: int
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> "Mpint":
+    def from_stream(cls, stream: BufferedIOBase) -> "Mpint":
         string = String.from_stream(stream)
         return Mpint(int.from_bytes(string.data))
 
@@ -87,7 +88,7 @@ class NameList(StructuredBytes):
     names: list[bytes]
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> "NameList":
+    def from_stream(cls, stream: BufferedIOBase) -> "NameList":
         length = int.from_bytes(stream.read(4), "big")
         names = stream.read(length).split(b",")
         return NameList(length, names)

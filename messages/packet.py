@@ -1,6 +1,6 @@
 from abc import ABC
 from dataclasses import dataclass
-from typing import IO
+from io import BufferedIOBase
 import secrets
 
 from stream_readers import require
@@ -23,7 +23,7 @@ class Packet[T: Payload](StructuredBytes):
 
     @classmethod
     def from_stream[U: Payload](
-        cls, stream: IO[bytes], payload_type: type[U], mac_length: int
+        cls, stream: BufferedIOBase, payload_type: type[U], mac_length: int
     ) -> "Packet[U]":
         packet_length = int.from_bytes(stream.read(4), "big")
         padding_length = int.from_bytes(stream.read(1), "big")
@@ -74,7 +74,7 @@ class AlgoExchange(Payload):
     first_kex_packet_follows: bool
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> AlgoExchange:
+    def from_stream(cls, stream: BufferedIOBase) -> AlgoExchange:
         require(stream, MessageNumbers.SSH_MSG_KEXINIT)
         return AlgoExchange(
             stream.read(16),
@@ -132,7 +132,7 @@ class KexDHInit(Payload):
     e: int
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes], *args, **kwargs) -> KexDHInit:
+    def from_stream(cls, stream: BufferedIOBase, *args, **kwargs) -> KexDHInit:
         # the client shouldn't need to read this from stream
         return NotImplemented
 
@@ -151,7 +151,7 @@ class KexDHReply(Payload):
     exchange_signature: String
 
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> KexDHReply:
+    def from_stream(cls, stream: BufferedIOBase) -> KexDHReply:
         require(stream, MessageNumbers.SSH_MSG_KEXDH_REPLY)
         return KexDHReply(
             String.from_stream(stream),
@@ -175,7 +175,7 @@ class KexDHReply(Payload):
 # this is stupid
 class NewKeys(Payload):
     @classmethod
-    def from_stream(cls, stream: IO[bytes]) -> NewKeys:
+    def from_stream(cls, stream: BufferedIOBase) -> NewKeys:
         return NewKeys()
 
     def to_bytes(self) -> bytes:

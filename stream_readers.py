@@ -1,7 +1,7 @@
-from typing import IO
+import io
 from trie import Trie
 
-def consume_until(s: IO[bytes], end: bytes | list[bytes] | Trie) -> tuple[bytes, bytes]:
+def consume_until(s: io.BufferedIOBase, end: bytes | list[bytes] | Trie) -> tuple[bytes, bytes]:
     """
     Consumes the socket non-greedily until end is found,
     returns (consumed bytes, end)
@@ -35,5 +35,5 @@ def consume_until(s: IO[bytes], end: bytes | list[bytes] | Trie) -> tuple[bytes,
                 return (ret, buf + c)
 
 
-def require(s: IO[bytes], pref: bytes):
+def require(s: io.BufferedIOBase, pref: bytes):
     assert s.read(len(pref)) == pref
