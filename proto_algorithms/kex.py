@@ -1,8 +1,8 @@
 from registry import Registry
-from typing import Protocol, TYPE_CHECKING
+from typing import Protocol, TYPE_CHECKING, Callable
 from dataclasses import dataclass
 import secrets
-from algorithms.hash import sha256
+from hashlib import sha256 as _sha256
 
 if TYPE_CHECKING:
     from main import Server
@@ -39,6 +39,20 @@ def pow_mod(g: int, x: int, p: int):
     return ans
 
 
+def make_key(
+    HASH: Callable[[bytes], bytes], KH: bytes, X: bytes, sid: bytes, length: int
+):
+    ans = HASH(KH + X + sid)
+    while len(ans) < length:
+        next_K = HASH(KH + ans)
+        ans += next_K
+    return ans[:length]
+
+
+def sha256(data: bytes) -> bytes:
+    return _sha256(data).digest()
+
+
 @registry.register(Metadata(proto_name=b"diffie-hellman-group14-sha256"))
 def dh_g14_sha256(server: Server):
     from messages.packet import KexDHInit, KexDHReply
@@ -58,7 +72,7 @@ def dh_g14_sha256(server: Server):
     # TODO: check if public key is valid
 
     K = Mpint(pow_mod(server_payload.f.num, x, p))
-    server.H = sha256(
+    H = sha256(
         String.build(server.client_meta.ident_string)
         + String.build(server.ident_string)
         + String.build(server.I_C)
@@ -67,4 +81,21 @@ def dh_g14_sha256(server: Server):
         + Mpint(e)
         + server_payload.f
         + K
-    ).digest()
+    )
+    if not server.session_id:
+        server.session_id = H
+
+    server.IV_ctos = sha256(K + H + b"A" + server.session_id)
+    server.IV_stoc = sha256(K + H + b"B" + server.session_id)
+    server.encr_key_ctos = make_key(
+        sha256, K + H, b"C", server.session_id, server.algos.encr_ctos.block_size
+    )
+    server.encr_key_stoc = make_key(
+        sha256, K + H, b"D", server.session_id, server.algos.encr_stoc.block_size
+    )
+    server.integrity_key_ctos = make_key(
+        sha256, K + H, b"E", server.session_id, server.algos.mac_ctos.key_len
+    )
+    server.integrity_key_stoc = make_key(
+        sha256, K + H, b"F", server.session_id, server.algos.mac_stoc.key_len
+    )

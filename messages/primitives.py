@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from enum import Enum
 
+
 # TODO: default impl for abstract methods?
 @dataclass
 class StructuredBytes(ABC):
@@ -13,7 +14,7 @@ class StructuredBytes(ABC):
         pass
 
     @abstractmethod
-    def to_bytes(self) -> bytes:
+    def to_bytes(self, *args, **kwargs) -> bytes:
         pass
 
     @classmethod
@@ -32,7 +33,7 @@ class StructuredBytes(ABC):
             if isinstance(other, StructuredBytes)
             else cast(bytes, other)  # not very nice but we trust ourselves
         ) + self.to_bytes()
-    
+
     def __bytes__(self):
         return self.to_bytes()
 

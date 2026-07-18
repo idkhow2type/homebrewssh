@@ -44,12 +44,17 @@ class Server:
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        self.algorithms: AlgoCollection
+        self.algos: AlgoCollection
         self.I_C: bytes
         self.I_S: bytes
         self.exchange_hash: bytes
-        self.K: Mpint
-        self.H: bytes
+        self.session_id: bytes
+        self.IV_ctos: bytes
+        self.IV_stoc: bytes
+        self.encr_key_ctos: bytes
+        self.encr_key_stoc: bytes
+        self.integrity_key_ctos: bytes
+        self.integrity_key_stoc: bytes
 
     def connect(self):
         self.socket.connect((self.host, self.port))
@@ -77,8 +82,7 @@ class Server:
         self.I_C = client_payload.to_bytes()
         self.I_S = server_payload.to_bytes()
 
-        self.algorithms = AlgoCollection(client_payload, server_payload)
-        self.algorithms.kex(self)
+        self.algos = AlgoCollection(client_payload, server_payload)
 
     @overload
     def disconnect(self): ...
@@ -126,5 +130,6 @@ if __name__ == "__main__":
     server = Server("127.0.0.1", int(sys.argv[1]) if len(sys.argv) >= 2 else 22)
     server.connect()
     server.negotiate_algos()
+    server.algos.kex(server)
     # server.disconnect(Disconnect.build(11, b"sorry i died", b""))
     server.send(NewKeys.build())

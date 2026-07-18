@@ -10,8 +10,8 @@ if TYPE_CHECKING:
 class AlgoCollection:
     kex: proto_algorithms.kex.Algorithm = field(init=False)
     server_host_key: proto_algorithms.server_host_key.Algorithm = field(init=False)
-    encryption_ctos: proto_algorithms.encryption_ctos.Algorithm = field(init=False)
-    encryption_stoc: proto_algorithms.encryption_ctos.Algorithm = field(init=False)
+    encr_ctos: proto_algorithms.encryption_ctos.Algorithm = field(init=False)
+    encr_stoc: proto_algorithms.encryption_ctos.Algorithm = field(init=False)
     mac_ctos: proto_algorithms.mac_ctos.Algorithm = field(init=False)
     mac_stoc: proto_algorithms.mac_ctos.Algorithm = field(init=False)
     compression_ctos: proto_algorithms.compression_ctos.Algorithm = field(init=False)
