@@ -1,17 +1,17 @@
 from abc import ABC
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, fields
+from typing import ClassVar, Callable
 from io import BufferedIOBase
 import secrets
 
 from .primitives import *
-import proto_algorithms as algos
+import proto_algorithms
+from proto_algorithms.collection import AlgoCollection
 
 
 @dataclass
 class Payload(StructuredBytes, ABC):
     CODE: ClassVar[bytes]
-    pass
 
 
 @dataclass
@@ -23,12 +23,10 @@ class Packet[T: Payload](StructuredBytes):
     mac: bytes
 
     @classmethod
-    def from_stream(
-        cls, stream: BufferedIOBase, mac_length: int
-    ) -> Packet:
+    def from_stream(cls, stream: BufferedIOBase, mac_length: int) -> Packet:
         packet_length = int.from_bytes(stream.read(4), "big")
         padding_length = int.from_bytes(stream.read(1), "big")
-        payload_type=PAYLOADS[stream.read(1)]
+        payload_type = PAYLOADS[stream.read(1)]
         payload = payload_type.from_stream(stream)
         random_padding = stream.read(padding_length)
         mac = stream.read(mac_length)
@@ -44,7 +42,9 @@ class Packet[T: Payload](StructuredBytes):
         )
 
     @classmethod
-    def build[U: Payload](cls, payload: U) -> "Packet[U]":
+    def build[U: Payload](
+        cls, payload: U, encryption: Callable | None = None
+    ) -> "Packet[U]":
         # TODO: store structuredbytes size instead of doing this
         payload_length = len(payload.to_bytes())
         padding_length = (8 - (4 + 1 + payload_length) % 8) % 8
@@ -64,68 +64,55 @@ class Packet[T: Payload](StructuredBytes):
 class KexInit(Payload):
     CODE = bytes([20])
     cookie: bytes
-    kex_algorithms: NameList
-    server_host_key_algorithms: NameList
-    encryption_algorithms_client_to_server: NameList
-    encryption_algorithms_server_to_client: NameList
-    mac_algorithms_client_to_server: NameList
-    mac_algorithms_server_to_client: NameList
-    compression_algorithms_client_to_server: NameList
-    compression_algorithms_server_to_client: NameList
-    languages_client_to_server: NameList
-    languages_server_to_client: NameList
+    # Name list fields will be dynamically loaded from AlgoCollection
+    # Might be overengineering
+    name_lists: dict[str, NameList]
     first_kex_packet_follows: bool
+    reserved: int
+
+    # def __post_init__(self,name_lists: list[NameList]):
+    #     pass
+
+    # def __init__(self, cookie: bytes, name_lists: list[NameList], first_kex_packet_follows: bool, reserved:int) -> None:
+    #     self.cookie=cookie
+    #     for list_name,list_val in zip(AlgoCollection.__dict__.keys(),name_lists):
+    #         setattr(self,list_name,list_val)
+    #     self.first_kex_packet_follows=first_kex_packet_follows
+    #     self.reserved=reserved
 
     @classmethod
     def from_stream(cls, stream: BufferedIOBase) -> KexInit:
         return KexInit(
             stream.read(16),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
-            NameList.from_stream(stream),
+            {
+                field.name: NameList.from_stream(stream)
+                for field in fields(proto_algorithms.collection.AlgoCollection)
+            },
             bool(int.from_bytes(stream.read(1), "big")),
+            int.from_bytes(stream.read(4)),
         )
 
     def to_bytes(self) -> bytes:
         return (
             self.CODE
             + self.cookie
-            + self.kex_algorithms
-            + self.server_host_key_algorithms
-            + self.encryption_algorithms_client_to_server
-            + self.encryption_algorithms_server_to_client
-            + self.mac_algorithms_client_to_server
-            + self.mac_algorithms_server_to_client
-            + self.compression_algorithms_client_to_server
-            + self.compression_algorithms_server_to_client
-            + self.languages_client_to_server
-            + self.languages_server_to_client
-            + bytes([self.first_kex_packet_follows])
-            + bytes([0, 0, 0, 0])  # reserved
+            + b"".join(nl.to_bytes() for nl in self.name_lists.values())
+            + self.first_kex_packet_follows.to_bytes()
+            + self.reserved.to_bytes(4)
         )
 
     @classmethod
     def build(cls) -> KexInit:
         return KexInit(
             secrets.token_bytes(16),
-            NameList.build(list(algos.kex.registry["proto_name"].keys())),
-            NameList.build(list(algos.server_host_key.registry["proto_name"].keys())),
-            NameList.build(list(algos.encryption.registry["proto_name"].keys())),
-            NameList.build(list(algos.encryption.registry["proto_name"].keys())),
-            NameList.build(list(algos.mac.registry["proto_name"].keys())),
-            NameList.build(list(algos.mac.registry["proto_name"].keys())),
-            NameList.build(list(algos.compression.registry["proto_name"].keys())),
-            NameList.build(list(algos.compression.registry["proto_name"].keys())),
-            NameList.build(list(algos.language.registry["proto_name"].keys())),
-            NameList.build(list(algos.language.registry["proto_name"].keys())),
+            {
+                field.name: NameList.build(
+                    getattr(proto_algorithms, field.name).registry["proto_name"].keys()
+                )
+                for field in fields(AlgoCollection)
+            },
             False,
+            0,
         )
 
 

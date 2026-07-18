@@ -78,7 +78,7 @@ class Server:
         self.I_S = server_payload.to_bytes()
 
         self.algorithms = AlgoCollection(client_payload, server_payload)
-        self.algorithms.kex_algorithms(self)
+        self.algorithms.kex(self)
 
     @overload
     def disconnect(self): ...
@@ -126,5 +126,5 @@ if __name__ == "__main__":
     server = Server("127.0.0.1", int(sys.argv[1]) if len(sys.argv) >= 2 else 22)
     server.connect()
     server.negotiate_algos()
+    # server.disconnect(Disconnect.build(11, b"sorry i died", b""))
     server.send(NewKeys.build())
-    server.disconnect(Disconnect.build(11, b"bye", b""))
