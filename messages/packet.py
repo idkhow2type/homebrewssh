@@ -32,10 +32,7 @@ class Packet[T: Payload](StructuredBytes):
         mac = stream.read(mac_length)
         return Packet(packet_length, padding_length, payload, random_padding, mac)
 
-    def to_bytes(
-        self,
-        encryption: Callable[[bytes], bytes] | None = None,
-    ) -> bytes:
+    def to_bytes(self, encryption: Callable[[bytes], bytes] | None) -> bytes:
         content = (
             self.packet_length.to_bytes(4, "big")
             + self.padding_length.to_bytes(1, "big")
@@ -46,9 +43,12 @@ class Packet[T: Payload](StructuredBytes):
             content = encryption(content)
         return content + self.mac
 
-    def compute_mac(self, mac: Callable[[bytes, bytes], bytes], key: bytes):
+    def compute_mac(
+        self, mac: proto_algorithms.mac_ctos.Algorithm, key: bytes, seq_num: int
+    ):
         content = (
-            self.packet_length.to_bytes(4, "big")
+            seq_num.to_bytes(4)
+            + self.packet_length.to_bytes(4, "big")
             + self.padding_length.to_bytes(1, "big")
             + self.payload.to_bytes()
             + self.random_padding
@@ -59,14 +59,19 @@ class Packet[T: Payload](StructuredBytes):
     def build[U: Payload](
         cls,
         payload: U,
-        mac: Callable[[bytes, bytes], bytes] | None = None,
-        key: bytes | None = None,
+        block_size: int | None,
+        mac: proto_algorithms.mac_ctos.Algorithm | None,
+        key: bytes | None,
+        seq_num: int | None,
     ) -> "Packet[U]":
         # TODO: store structuredbytes size instead of doing this
         payload_length = len(payload.to_bytes())
-        padding_length = (8 - (4 + 1 + payload_length) % 8) % 8
+        if block_size is None:
+            block_size = 8
+        block_size = max(8, block_size)
+        padding_length = (-(4 + 1 + payload_length)) % block_size
         if padding_length < 4:
-            padding_length += 8
+            padding_length += block_size
         packet_length = 1 + payload_length + padding_length
 
         packet = Packet(
@@ -76,8 +81,8 @@ class Packet[T: Payload](StructuredBytes):
             secrets.token_bytes(padding_length),
             b"",
         )
-        if mac and key:
-            packet.mac = packet.compute_mac(mac, key)
+        if mac is not None and key is not None and seq_num is not None:
+            packet.mac = packet.compute_mac(mac, key, seq_num)
         return packet
 
 

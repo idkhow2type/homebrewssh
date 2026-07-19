@@ -73,11 +73,12 @@ def dh_g14_sha256(server: Server[AlgoCollection]):
     # TODO: check if public key is valid
 
     K = Mpint(pow_mod(server_payload.f.num, x, p))
+    server.K=K
     H = sha256(
         String.build(server.client_meta.ident_string)
         + String.build(server.ident_string)
-        + String.build(server.I_C)
-        + String.build(server.I_S)
+        + String.build(server.I_C.to_bytes())
+        + String.build(server.I_S.to_bytes())
         + server_payload.public_key
         + Mpint(e)
         + server_payload.f

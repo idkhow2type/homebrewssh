@@ -26,5 +26,4 @@ registry: Registry[InputFunc, Algorithm, Metadata] = Registry()
 
 @registry.register(Metadata(proto_name=b"hmac-sha1", key_len=20))
 def hmac_sha1(data: bytes, key: bytes) -> bytes:
-    hmac_obj = hmac.new(key, data, sha1)
-    return hmac_obj.digest()
+    return hmac.new(key, data, sha1).digest()
