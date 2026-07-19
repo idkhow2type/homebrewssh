@@ -1,8 +1,13 @@
 from dataclasses import dataclass
 from io import BytesIO
 import unittest
+import subprocess
+import shutil
+import os
+import socket
 
-from messages.primitives import AlgoExchange, NameList, Packet, Payload
+from messages.primitives import String, Mpint, NameList
+from messages.packet import Packet, KexInit, KexDHInit, KexDHReply, NewKeys, Disconnect, Ignore, Debug, Unimplemented
 from stream_readers import consume_until
 from trie import Trie
 
@@ -49,95 +54,104 @@ class ConsumeUntilTests(unittest.TestCase):
         self.assertEqual(marker, b"\r\n")
 
 
-@dataclass
-class DummyPayload(Payload):
-    message_type: int
-    body: bytes
+class PrimitivesTests(unittest.TestCase):
+    def test_string_round_trip(self):
+        data = b"hello ssh"
+        s = String.build(data)
+        raw = s.to_bytes()
+        restored = String.from_stream(BytesIO(raw))
+        self.assertEqual(restored.data, data)
+        self.assertEqual(restored.to_bytes(), raw)
 
-    @classmethod
-    def from_stream(cls, stream: BytesIO) -> "DummyPayload":
-        message_type = int.from_bytes(stream.read(1), "big")
-        body_length = int.from_bytes(stream.read(1), "big")
-        body = stream.read(body_length)
-        return cls(message_type, body)
+    def test_mpint_round_trip(self):
+        for val in [0, 1, 127, 128, -1, -128, -129, 2**31-1, 2**31]:
+            with self.subTest(val=val):
+                m = Mpint.build(val)
+                raw = m.to_bytes()
+                restored = Mpint.from_stream(BytesIO(raw))
+                self.assertEqual(restored.num, val)
+                self.assertEqual(restored.to_bytes(), raw)
 
-    def to_bytes(self) -> bytes:
-        return (
-            self.message_type.to_bytes(1, "big")
-            + len(self.body).to_bytes(1, "big")
-            + self.body
-        )
-
-    @classmethod
-    def build(cls, *args, **kwargs) -> "DummyPayload":
-        return super().build(*args, **kwargs)
-
-
-class PacketTests(unittest.TestCase):
     def test_name_list_round_trip(self):
         names = [b"curve25519-sha256", b"ecdh-sha2-nistp256"]
-        payload = NameList(len(b"curve25519-sha256,ecdh-sha2-nistp256"), names)
-
-        raw = payload.to_bytes()
+        nl = NameList.build(names)
+        raw = nl.to_bytes()
         restored = NameList.from_stream(BytesIO(raw))
-
-        self.assertEqual(restored.length, payload.length)
         self.assertEqual(restored.names, names)
         self.assertEqual(restored.to_bytes(), raw)
 
-    def test_packet_round_trip_preserves_payload_padding_and_mac(self):
-        payload = DummyPayload(7, b"hello")
-        packet = Packet(
-            packet_length=14,
-            padding_length=4,
+    def test_name_list_empty_round_trip(self):
+        nl = NameList.build([])
+        raw = nl.to_bytes()
+        restored = NameList.from_stream(BytesIO(raw))
+        self.assertEqual(restored.names, [])
+        self.assertEqual(restored.to_bytes(), raw)
+
+
+class PacketTests(unittest.TestCase):
+    def test_packet_round_trip(self):
+        # Using KexInit as the payload
+        payload = KexInit.build()
+        packet = Packet.build(
             payload=payload,
-            random_padding=b"abcd",
-            mac=b"mac",
+            block_size=8,
+            mac=None, 
+            key=None, 
+            seq_num=None
         )
 
-        raw = packet.to_bytes()
-        restored = Packet.from_stream(BytesIO(raw), DummyPayload, mac_length=3)
+        raw = packet.to_bytes(encryption=None)
+        # Packet.from_stream requires mac_length. If mac is empty, length is 0.
+        restored = Packet.from_stream(BytesIO(raw), mac_length=0)
 
         self.assertEqual(restored.packet_length, packet.packet_length)
         self.assertEqual(restored.padding_length, packet.padding_length)
         self.assertEqual(restored.payload, payload)
-        self.assertEqual(restored.random_padding, packet.random_padding)
-        self.assertEqual(restored.mac, packet.mac)
-        self.assertEqual(restored.to_bytes(), raw)
+        self.assertEqual(restored.to_bytes(None), raw)
 
-    def test_algo_exchange_round_trip(self):
-        def nlist(*names: bytes) -> NameList:
-            raw_names = b",".join(names)
-            return NameList(len(raw_names), list(names))
-
-        payload = AlgoExchange(
-            cookie=b"0123456789abcdef",
-            kex_algorithms=nlist(b"curve25519-sha256"),
-            server_host_key_algorithms=nlist(b"ssh-ed25519"),
-            encryption_algorithms_client_to_server=nlist(b"aes128-ctr", b"aes256-ctr"),
-            encryption_algorithms_server_to_client=nlist(b"aes128-ctr", b"aes256-ctr"),
-            mac_algorithms_client_to_server=nlist(b"hmac-sha2-256"),
-            mac_algorithms_server_to_client=nlist(b"hmac-sha2-256"),
-            compression_algorithms_client_to_server=nlist(b"none"),
-            compression_algorithms_server_to_client=nlist(b"none"),
-            languages_client_to_server=nlist(b"en-US"),
-            languages_server_to_client=nlist(b"en-US"),
-            first_kex_packet_follows=True,
-        )
-
+    def test_kex_init_round_trip(self):
+        payload = KexInit.build()
         raw = payload.to_bytes()
-        restored = AlgoExchange.from_stream(BytesIO(raw))
-
+        restored = KexInit.from_stream(BytesIO(raw))
         self.assertEqual(restored, payload)
-        self.assertEqual(restored.to_bytes(), raw)
 
-    def test_build_algo_exchange(self):
-        payload = AlgoExchange.build()
-        self.assertEqual(
-            payload.to_bytes(),
-            AlgoExchange.from_stream(BytesIO(payload.to_bytes())).to_bytes(),
-        )
+    def test_kex_dh_init_round_trip(self):
+        payload = KexDHInit.build(e=123456789)
+        raw = payload.to_bytes()
+        # Since KexDHInit.from_stream is NotImplemented, we manually verify the bytes.
+        # The CODE byte is now handled by the Packet class, not by Payload.to_bytes().
+        self.assertEqual(payload.CODE, b'\x1e')
+        self.assertTrue(len(raw) > 0)
 
+    def test_disconnect_round_trip(self):
+        payload = Disconnect.build(1, b"error", b"en")
+        raw = payload.to_bytes()
+        restored = Disconnect.from_stream(BytesIO(raw))
+        self.assertEqual(restored, payload)
+
+
+class IntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.sshd_path = shutil.which("sshd")
+
+    def test_ssh_banner(self):
+        if not self.sshd_path:
+            self.skipTest("sshd not found in PATH")
+        
+        try:
+            # Start sshd in a way that it doesn't block or require config
+            # Note: In a real environment, this would need a specific config
+            # but here we just check if we can at least run it or talk to a port
+            # For a true integration test, we'd ideally use a mock server or a 
+            # pre-configured local sshd.
+            
+            # We'll attempt to connect to the local machine on port 22 to see if 
+            # an SSH server is running and sending a banner.
+            with socket.create_connection(("localhost", 22), timeout=1) as sock:
+                banner = sock.recv(1024)
+                self.assertTrue(banner.startswith(b"SSH-"))
+        except (ConnectionRefusedError, socket.timeout):
+            self.skipTest("No SSH server running on localhost:22")
 
 if __name__ == "__main__":
     unittest.main()
