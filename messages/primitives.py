@@ -63,12 +63,24 @@ class Mpint(StructuredBytes):
     @classmethod
     def from_stream(cls, stream: BufferedIOBase) -> "Mpint":
         string = String.from_stream(stream)
-        return Mpint(int.from_bytes(string.data))
+        return Mpint(int.from_bytes(string.data, "big", signed=True))
 
     def to_bytes(self) -> bytes:
-        data = (b"\x00" if self.num >= 0 else b"") + self.num.to_bytes(
-            (self.num.bit_length() + 7) // 8
-        )
+        if self.num == 0:
+            return String(0, b"").to_bytes()
+        length = (self.num.bit_length() + 8) // 8
+        try:
+            data = self.num.to_bytes(length, "big", signed=True)
+        except OverflowError:
+            length += 1
+            data = self.num.to_bytes(length, "big", signed=True)
+        while len(data) > 1:
+            if data[0] == 0x00 and (data[1] & 0x80) == 0:
+                data = data[1:]
+            elif data[0] == 0xFF and (data[1] & 0x80) != 0:
+                data = data[1:]
+            else:
+                break
         return String(len(data), data).to_bytes()
 
     @classmethod

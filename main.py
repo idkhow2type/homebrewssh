@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import cast, overload, Callable
+from typing import cast, overload
 import socket
 from io import BytesIO
 import sys
