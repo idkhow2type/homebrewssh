@@ -6,12 +6,13 @@ from hashlib import sha256 as _sha256
 
 if TYPE_CHECKING:
     from main import Server
+    from proto_algorithms.collection import AlgoCollection
 
 
 class InputFunc(Protocol):
     __name__: str
 
-    def __call__(self, server: Server): ...
+    def __call__(self, server: Server[AlgoCollection]): ...
 
 
 @dataclass
@@ -54,7 +55,7 @@ def sha256(data: bytes) -> bytes:
 
 
 @registry.register(Metadata(proto_name=b"diffie-hellman-group14-sha256"))
-def dh_g14_sha256(server: Server):
+def dh_g14_sha256(server: Server[AlgoCollection]):
     from messages.packet import KexDHInit, KexDHReply
     from messages.primitives import Mpint, String
 
@@ -85,13 +86,17 @@ def dh_g14_sha256(server: Server):
     if not server.session_id:
         server.session_id = H
 
-    server.IV_ctos = sha256(K + H + b"A" + server.session_id)
-    server.IV_stoc = sha256(K + H + b"B" + server.session_id)
-    server.encr_key_ctos = make_key(
-        sha256, K + H, b"C", server.session_id, server.algos.encr_ctos.block_size
+    server.IV_ctos = sha256(K + H + b"A" + server.session_id)[
+        : server.algos.encryption_ctos.block_size
+    ]
+    server.IV_stoc = sha256(K + H + b"B" + server.session_id)[
+        : server.algos.encryption_stoc.block_size
+    ]
+    server.encryption_key_ctos = make_key(
+        sha256, K + H, b"C", server.session_id, server.algos.encryption_ctos.block_size
     )
-    server.encr_key_stoc = make_key(
-        sha256, K + H, b"D", server.session_id, server.algos.encr_stoc.block_size
+    server.encryption_key_stoc = make_key(
+        sha256, K + H, b"D", server.session_id, server.algos.encryption_stoc.block_size
     )
     server.integrity_key_ctos = make_key(
         sha256, K + H, b"E", server.session_id, server.algos.mac_ctos.key_len

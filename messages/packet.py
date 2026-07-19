@@ -1,6 +1,6 @@
 from abc import ABC
 from dataclasses import dataclass, fields
-from typing import ClassVar, Callable, overload
+from typing import ClassVar, Callable
 from io import BufferedIOBase
 import secrets
 
@@ -20,7 +20,7 @@ class Packet[T: Payload](StructuredBytes):
     padding_length: int
     payload: T
     random_padding: bytes
-    # mac: bytes
+    mac: bytes
 
     @classmethod
     def from_stream(cls, stream: BufferedIOBase, mac_length: int) -> Packet:
@@ -30,14 +30,11 @@ class Packet[T: Payload](StructuredBytes):
         payload = payload_type.from_stream(stream)
         random_padding = stream.read(padding_length)
         mac = stream.read(mac_length)
-        return Packet(packet_length, padding_length, payload, random_padding)
+        return Packet(packet_length, padding_length, payload, random_padding, mac)
 
     def to_bytes(
         self,
-        encr: Callable[[bytes, bytes], bytes] | None = None,
-        mac: Callable[[bytes, bytes], bytes] | None = None,
-        encr_key: bytes | None = None,
-        mac_key: bytes | None = None,
+        encryption: Callable[[bytes], bytes] | None = None,
     ) -> bytes:
         content = (
             self.packet_length.to_bytes(4, "big")
@@ -45,30 +42,43 @@ class Packet[T: Payload](StructuredBytes):
             + self.payload.to_bytes()
             + self.random_padding
         )
-        content_mac = b""
-        if mac and mac_key:
-            content_mac = mac(content, mac_key)
-        if encr and encr_key:
-            content = encr(content, encr_key)
-        return (
+        if encryption:
+            content = encryption(content)
+        return content + self.mac
+
+    def compute_mac(self, mac: Callable[[bytes, bytes], bytes], key: bytes):
+        content = (
             self.packet_length.to_bytes(4, "big")
             + self.padding_length.to_bytes(1, "big")
             + self.payload.to_bytes()
             + self.random_padding
-            + content_mac
         )
+        return mac(content, key)
 
     @classmethod
-    def build[U: Payload](cls, payload: U) -> "Packet[U]":
+    def build[U: Payload](
+        cls,
+        payload: U,
+        mac: Callable[[bytes, bytes], bytes] | None = None,
+        key: bytes | None = None,
+    ) -> "Packet[U]":
         # TODO: store structuredbytes size instead of doing this
         payload_length = len(payload.to_bytes())
         padding_length = (8 - (4 + 1 + payload_length) % 8) % 8
         if padding_length < 4:
             padding_length += 8
         packet_length = 1 + payload_length + padding_length
-        return Packet(
-            packet_length, padding_length, payload, secrets.token_bytes(padding_length)
+
+        packet = Packet(
+            packet_length,
+            padding_length,
+            payload,
+            secrets.token_bytes(padding_length),
+            b"",
         )
+        if mac and key:
+            packet.mac = packet.compute_mac(mac, key)
+        return packet
 
 
 @dataclass

@@ -6,18 +6,31 @@ if TYPE_CHECKING:
     import proto_algorithms
 
 
+class DefaultAlgoCollection:
+    kex = None
+    server_host_key = None
+    encryption_ctos = None
+    encryption_stoc = None
+    mac_ctos = None
+    mac_stoc = None
+    compression_ctos = None
+    compression_stoc = None
+    languages_ctos = None
+    languages_stoc = None
+
+
 @dataclass
 class AlgoCollection:
-    kex: proto_algorithms.kex.Algorithm = field(init=False)
-    server_host_key: proto_algorithms.server_host_key.Algorithm = field(init=False)
-    encr_ctos: proto_algorithms.encryption_ctos.Algorithm = field(init=False)
-    encr_stoc: proto_algorithms.encryption_ctos.Algorithm = field(init=False)
-    mac_ctos: proto_algorithms.mac_ctos.Algorithm = field(init=False)
-    mac_stoc: proto_algorithms.mac_ctos.Algorithm = field(init=False)
-    compression_ctos: proto_algorithms.compression_ctos.Algorithm = field(init=False)
-    compression_stoc: proto_algorithms.compression_ctos.Algorithm = field(init=False)
-    languages_ctos: proto_algorithms.languages_ctos.Algorithm = field(init=False)
-    languages_stoc: proto_algorithms.languages_ctos.Algorithm = field(init=False)
+    kex: proto_algorithms.kex.Algorithm
+    server_host_key: proto_algorithms.server_host_key.Algorithm
+    encryption_ctos: proto_algorithms.encryption_ctos.Algorithm
+    encryption_stoc: proto_algorithms.encryption_ctos.Algorithm
+    mac_ctos: proto_algorithms.mac_ctos.Algorithm
+    mac_stoc: proto_algorithms.mac_ctos.Algorithm
+    compression_ctos: proto_algorithms.compression_ctos.Algorithm
+    compression_stoc: proto_algorithms.compression_ctos.Algorithm
+    languages_ctos: proto_algorithms.languages_ctos.Algorithm
+    languages_stoc: proto_algorithms.languages_ctos.Algorithm
 
     def __init__(self, client_payload: KexInit, server_payload: KexInit) -> None:
         import proto_algorithms
