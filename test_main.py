@@ -7,7 +7,7 @@ import os
 import socket
 
 from messages.primitives import String, Mpint, NameList
-from messages.packet import Packet, KexInit, KexDHInit, KexDHReply, NewKeys, Disconnect, Ignore, Debug, Unimplemented
+from messages.packet import Payload, Packet, KexInit, KexDHInit, KexDHReply, NewKeys, Disconnect, Ignore, Debug, Unimplemented
 from stream_readers import consume_until
 from trie import Trie
 
@@ -112,7 +112,9 @@ class PacketTests(unittest.TestCase):
     def test_kex_init_round_trip(self):
         payload = KexInit.build()
         raw = payload.to_bytes()
-        restored = KexInit.from_stream(BytesIO(raw))
+        stream=BytesIO(raw)
+        stream.read(1) # read msg code since payload doesnt parse it
+        restored = KexInit.from_stream(stream)
         self.assertEqual(restored, payload)
 
     def test_kex_dh_init_round_trip(self):
@@ -126,32 +128,113 @@ class PacketTests(unittest.TestCase):
     def test_disconnect_round_trip(self):
         payload = Disconnect.build(1, b"error", b"en")
         raw = payload.to_bytes()
-        restored = Disconnect.from_stream(BytesIO(raw))
+        stream=BytesIO(raw)
+        stream.read(1) # read msg code since payload doesnt parse it
+        restored = Disconnect.from_stream(stream)
         self.assertEqual(restored, payload)
 
 
+from main import Server
+
+import tempfile
+
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
-        self.sshd_path = shutil.which("sshd")
+        self.sshd_bin = shutil.which("sshd")
+        self.keygen_bin = shutil.which("ssh-keygen")
+        self.temp_dir = tempfile.mkdtemp()
+        self.sshd_process = None
+        self.port: int = 0
 
-    def test_ssh_banner(self):
-        if not self.sshd_path:
-            self.skipTest("sshd not found in PATH")
+    def tearDown(self):
+        if self.sshd_process:
+            self.sshd_process.terminate()
+            self.sshd_process.wait()
+        self.log_file.close()
+        shutil.rmtree(self.temp_dir,True)
+
+    def start_mock_sshd(self):
+        if not self.sshd_bin or not self.keygen_bin:
+            self.skipTest("sshd or ssh-keygen not found in PATH")
+
+        # 1. Generate host keys
+        host_key = os.path.join(self.temp_dir, "ssh_host_rsa_key")
+        subprocess.run([
+            self.keygen_bin, "-t", "rsa", "-f", host_key, "-N", "", "-q"
+        ], check=True)
+
+        # 2. Create config file
+        config_path = os.path.join(self.temp_dir, "sshd_config")
+        # Use a config that allows running as non-root and avoids common failures
+        config_content = (
+            "Port 0\n"
+            "HostKey " + host_key + "\n"
+            "PasswordAuthentication no\n"
+            "PubkeyAuthentication no\n"
+            "PermitEmptyPasswords no\n"
+            "PidFile " + os.path.join(self.temp_dir, "sshd.pid") + "\n"
+        )
+        with open(config_path, "w") as f:
+            f.write(config_content)
+        
+        # Strict permissions for host key
+        os.chmod(host_key, 0o600)
+
+        # 3. Start sshd on a random port
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("localhost", 0))
+            self.port = s.getsockname()[1]
+
+        # Capture stderr to a file for debugging if it fails
+        self.log_file = open(os.path.join(self.temp_dir, "sshd.log"), "w")
+        self.sshd_process = subprocess.Popen([
+            self.sshd_bin, "-ddd", "-p", str(self.port), "-f", config_path
+        ], stdout=subprocess.DEVNULL, stderr=self.log_file)
+        
+        # Wait for server to start
+        import time
+        time.sleep(0.5)
+
+    def test_full_handshake(self):
+        """
+        Test the client against a freshly spun-up OpenSSH server on a free port.
+        """
+        self.start_mock_sshd()
         
         try:
-            # Start sshd in a way that it doesn't block or require config
-            # Note: In a real environment, this would need a specific config
-            # but here we just check if we can at least run it or talk to a port
-            # For a true integration test, we'd ideally use a mock server or a 
-            # pre-configured local sshd.
+            # Initialize client and connect to the temporary sshd
+            client = Server("localhost", self.port)
+            client.connect()
             
-            # We'll attempt to connect to the local machine on port 22 to see if 
-            # an SSH server is running and sending a banner.
-            with socket.create_connection(("localhost", 22), timeout=1) as sock:
-                banner = sock.recv(1024)
-                self.assertTrue(banner.startswith(b"SSH-"))
-        except (ConnectionRefusedError, socket.timeout):
-            self.skipTest("No SSH server running on localhost:22")
+            # 1. Algorithm Negotiation
+            client = client.negotiate_algos()
+            
+            # 2. Key Exchange (KEX)
+            client.algos.kex(client)
+            
+            # 3. Exchange NewKeys
+            client.send(NewKeys.build())
+            client.recv(NewKeys)
+            
+            # Verify keys were derived
+            self.assertIsNotNone(client.encryption_key_ctos)
+            self.assertIsNotNone(client.session_id)
+            
+            # Clean up
+            client.disconnect()
+            
+        except Exception as e:
+            log_content = ""
+            log_path = os.path.join(self.temp_dir, "sshd.log")
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, "r") as log_file:
+                        log_content = "\n\n--- Server Debug Logs ---\n" + log_file.read()
+                except Exception as log_e:
+                    log_content = f"\n\nCould not read server logs: {log_e}"
+            self.fail(f"Handshake failed with temporary sshd: {e.__class__.__name__}: {e}{log_content}")
+
+        self.tearDown()
 
 if __name__ == "__main__":
     unittest.main()

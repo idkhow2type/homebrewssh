@@ -121,7 +121,7 @@ class KexInit(Payload):
             secrets.token_bytes(16),
             {
                 field.name: NameList.build(
-                    getattr(proto_algorithms, field.name).registry["proto_name"].keys()
+                    list(getattr(proto_algorithms, field.name).registry["proto_name"].keys())
                 )
                 for field in fields(AlgoCollection)
             },

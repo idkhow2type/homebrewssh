@@ -96,7 +96,7 @@ class NameList(StructuredBytes):
     @classmethod
     def from_stream(cls, stream: BufferedIOBase) -> "NameList":
         length = int.from_bytes(stream.read(4), "big")
-        names = stream.read(length).split(b",")
+        names = stream.read(length).split(b",") if length else []
         return NameList(length, names)
 
     def to_bytes(self) -> bytes:
