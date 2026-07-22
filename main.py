@@ -4,17 +4,11 @@ import socket
 from io import BytesIO
 import sys
 
-from messages.packet import (
-    Packet,
-    KexInit,
-    NewKeys,
-    Payload,
-    Disconnect,
-    Ignore,
-    Unimplemented,
-    Debug,
-    Mpint,
-)
+from messages.packet import Packet, Payload, Mpint
+from messages.kex import KexInit, NewKeys
+from messages.misc import Disconnect, Ignore, Unimplemented, Debug
+from messages.auth import UserAuthRequest_None
+
 from stream_readers import consume_until, require
 from proto_algorithms.collection import AlgoCollection, DefaultAlgoCollection
 
@@ -96,8 +90,7 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
     def disconnect(self, payload: Disconnect): ...
     def disconnect(self, payload=None):
         # imagine having to free in a gc language
-        if payload:
-            self.send(payload)
+        self.send(payload or Disconnect.build(11, b"Closing connection", b""))
         if self.sock_file:
             self.sock_file.close()
         self.socket.close()
@@ -110,7 +103,7 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
                 self.algos.mac_ctos,
                 self.integrity_key_ctos,
                 self.client_seq_num,
-            ).to_bytes(self.algos.encryption_ctos.encrypt)
+            ).to_bytes(self.algos.encryption_ctos)
         else:
             packet = Packet.build(payload, None, None, None, None).to_bytes(None)
         self.socket.sendall(packet)
@@ -126,7 +119,13 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         if not self.sock_file:
             raise RuntimeError("Socket stream is not initialized")
 
-        payload = Packet.from_stream(self.sock_file, 0).payload
+        if self.algos.encryption_stoc and self.algos.encryption_stoc._cipher:
+            payload = Packet.from_stream(
+                self.sock_file, self.algos.encryption_stoc, self.algos.mac_stoc
+            ).payload
+        else:
+            payload = Packet.from_stream(self.sock_file, None, None).payload
+
         match payload.CODE:
             case Disconnect.CODE:
                 payload = cast(Disconnect, payload)
@@ -152,7 +151,13 @@ if __name__ == "__main__":
     server = server.negotiate_algos()
     server.algos.kex(server)
     server.send(NewKeys.build())
-    print(server.recv(NewKeys))
 
     server.algos.encryption_ctos.setup(server.encryption_key_ctos, server.IV_ctos)
-    server.disconnect(Disconnect.build(11, b"sorry i died", b""))
+    server.algos.encryption_stoc.setup(server.encryption_key_stoc, server.IV_stoc)
+
+    server.send(UserAuthRequest_None.build(b"idkhow2type"))
+    assert server.sock_file is not None
+    print(server.socket.recv(1024))
+    # print(server.recv())
+
+    server.disconnect()

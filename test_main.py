@@ -7,7 +7,9 @@ import os
 import socket
 
 from messages.primitives import String, Mpint, NameList
-from messages.packet import Payload, Packet, KexInit, KexDHInit, KexDHReply, NewKeys, Disconnect, Ignore, Debug, Unimplemented
+from messages.packet import Packet, Payload, Mpint
+from messages.kex import KexInit, NewKeys, KexDHInit
+from messages.misc import Disconnect, Ignore, Unimplemented, Debug
 from stream_readers import consume_until
 from trie import Trie
 
@@ -64,7 +66,7 @@ class PrimitivesTests(unittest.TestCase):
         self.assertEqual(restored.to_bytes(), raw)
 
     def test_mpint_round_trip(self):
-        for val in [0, 1, 127, 128, -1, -128, -129, 2**31-1, 2**31]:
+        for val in [0, 1, 127, 128, -1, -128, -129, 2**31 - 1, 2**31]:
             with self.subTest(val=val):
                 m = Mpint.build(val)
                 raw = m.to_bytes()
@@ -93,16 +95,12 @@ class PacketTests(unittest.TestCase):
         # Using KexInit as the payload
         payload = KexInit.build()
         packet = Packet.build(
-            payload=payload,
-            block_size=8,
-            mac=None, 
-            key=None, 
-            seq_num=None
+            payload=payload, block_size=8, mac=None, key=None, seq_num=None
         )
 
         raw = packet.to_bytes(encryption=None)
         # Packet.from_stream requires mac_length. If mac is empty, length is 0.
-        restored = Packet.from_stream(BytesIO(raw), mac_length=0)
+        restored = Packet.from_stream(BytesIO(raw), None, None)
 
         self.assertEqual(restored.packet_length, packet.packet_length)
         self.assertEqual(restored.padding_length, packet.padding_length)
@@ -112,8 +110,8 @@ class PacketTests(unittest.TestCase):
     def test_kex_init_round_trip(self):
         payload = KexInit.build()
         raw = payload.to_bytes()
-        stream=BytesIO(raw)
-        stream.read(1) # read msg code since payload doesnt parse it
+        stream = BytesIO(raw)
+        stream.read(1)  # read msg code since payload doesnt parse it
         restored = KexInit.from_stream(stream)
         self.assertEqual(restored, payload)
 
@@ -122,14 +120,14 @@ class PacketTests(unittest.TestCase):
         raw = payload.to_bytes()
         # Since KexDHInit.from_stream is NotImplemented, we manually verify the bytes.
         # The CODE byte is now handled by the Packet class, not by Payload.to_bytes().
-        self.assertEqual(payload.CODE, b'\x1e')
+        self.assertEqual(payload.CODE, b"\x1e")
         self.assertTrue(len(raw) > 0)
 
     def test_disconnect_round_trip(self):
         payload = Disconnect.build(1, b"error", b"en")
         raw = payload.to_bytes()
-        stream=BytesIO(raw)
-        stream.read(1) # read msg code since payload doesnt parse it
+        stream = BytesIO(raw)
+        stream.read(1)  # read msg code since payload doesnt parse it
         restored = Disconnect.from_stream(stream)
         self.assertEqual(restored, payload)
 
@@ -137,6 +135,7 @@ class PacketTests(unittest.TestCase):
 from main import Server
 
 import tempfile
+
 
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
@@ -151,7 +150,7 @@ class IntegrationTests(unittest.TestCase):
             self.sshd_process.terminate()
             self.sshd_process.wait()
         self.log_file.close()
-        shutil.rmtree(self.temp_dir,True)
+        shutil.rmtree(self.temp_dir, True)
 
     def start_mock_sshd(self):
         if not self.sshd_bin or not self.keygen_bin:
@@ -159,9 +158,9 @@ class IntegrationTests(unittest.TestCase):
 
         # 1. Generate host keys
         host_key = os.path.join(self.temp_dir, "ssh_host_rsa_key")
-        subprocess.run([
-            self.keygen_bin, "-t", "rsa", "-f", host_key, "-N", "", "-q"
-        ], check=True)
+        subprocess.run(
+            [self.keygen_bin, "-t", "rsa", "-f", host_key, "-N", "", "-q"], check=True
+        )
 
         # 2. Create config file
         config_path = os.path.join(self.temp_dir, "sshd_config")
@@ -176,7 +175,7 @@ class IntegrationTests(unittest.TestCase):
         )
         with open(config_path, "w") as f:
             f.write(config_content)
-        
+
         # Strict permissions for host key
         os.chmod(host_key, 0o600)
 
@@ -187,12 +186,15 @@ class IntegrationTests(unittest.TestCase):
 
         # Capture stderr to a file for debugging if it fails
         self.log_file = open(os.path.join(self.temp_dir, "sshd.log"), "w")
-        self.sshd_process = subprocess.Popen([
-            self.sshd_bin, "-ddd", "-p", str(self.port), "-f", config_path
-        ], stdout=subprocess.DEVNULL, stderr=self.log_file)
-        
+        self.sshd_process = subprocess.Popen(
+            [self.sshd_bin, "-ddd", "-p", str(self.port), "-f", config_path],
+            stdout=subprocess.DEVNULL,
+            stderr=self.log_file,
+        )
+
         # Wait for server to start
         import time
+
         time.sleep(0.5)
 
     def test_full_handshake(self):
@@ -200,41 +202,46 @@ class IntegrationTests(unittest.TestCase):
         Test the client against a freshly spun-up OpenSSH server on a free port.
         """
         self.start_mock_sshd()
-        
+
         try:
             # Initialize client and connect to the temporary sshd
             client = Server("localhost", self.port)
             client.connect()
-            
+
             # 1. Algorithm Negotiation
             client = client.negotiate_algos()
-            
+
             # 2. Key Exchange (KEX)
             client.algos.kex(client)
-            
+
             # 3. Exchange NewKeys
             client.send(NewKeys.build())
             client.recv(NewKeys)
-            
+
             # Verify keys were derived
             self.assertIsNotNone(client.encryption_key_ctos)
             self.assertIsNotNone(client.session_id)
-            
+
             # Clean up
             client.disconnect()
-            
+
         except Exception as e:
             log_content = ""
             log_path = os.path.join(self.temp_dir, "sshd.log")
             if os.path.exists(log_path):
                 try:
                     with open(log_path, "r") as log_file:
-                        log_content = "\n\n--- Server Debug Logs ---\n" + log_file.read()
+                        log_content = (
+                            "\n\n--- Server Debug Logs ---\n" + log_file.read()
+                        )
                 except Exception as log_e:
                     log_content = f"\n\nCould not read server logs: {log_e}"
-            self.fail(f"Handshake failed with temporary sshd: {e.__class__.__name__}: {e}{log_content}")
+            self.fail(
+                f"Handshake failed with temporary sshd: {e.__class__.__name__}: {e}{log_content}"
+            )
 
         self.tearDown()
+
 
 if __name__ == "__main__":
     unittest.main()

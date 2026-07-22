@@ -1,17 +1,25 @@
 from abc import ABC
-from dataclasses import dataclass, fields
-from typing import ClassVar, Callable
-from io import BufferedIOBase
+from dataclasses import dataclass
+from typing import ClassVar
+from io import BufferedIOBase, BytesIO
 import secrets
 
 from .primitives import *
-import proto_algorithms
-from proto_algorithms.collection import AlgoCollection
+from proto_algorithms.encryption_ctos import Algorithm as Encryption
+from proto_algorithms.encryption_stoc import Algorithm as Decryption
+from proto_algorithms.mac_ctos import Algorithm as MacCtos
+from proto_algorithms.mac_stoc import Algorithm as MacStoc
+
+PAYLOADS = {}
 
 
 @dataclass
 class Payload(StructuredBytes, ABC):
     CODE: ClassVar[bytes]
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        PAYLOADS[cls.CODE] = cls
 
 
 @dataclass
@@ -23,16 +31,29 @@ class Packet[T: Payload](StructuredBytes):
     mac: bytes
 
     @classmethod
-    def from_stream(cls, stream: BufferedIOBase, mac_length: int) -> Packet:
-        packet_length = int.from_bytes(stream.read(4), "big")
-        padding_length = int.from_bytes(stream.read(1), "big")
-        payload_type = PAYLOADS[stream.read(1)]
-        payload = payload_type.from_stream(stream)
-        random_padding = stream.read(padding_length)
-        mac = stream.read(mac_length)
-        return Packet(packet_length, padding_length, payload, random_padding, mac)
+    def from_stream(
+        cls, stream: BufferedIOBase, decryption: Decryption | None, mac: MacStoc | None
+    ) -> Self:
+        if decryption is None:
+            packet_length = int.from_bytes(stream.read(4), "big")
+            padding_length = int.from_bytes(stream.read(1), "big")
+            payload_type = PAYLOADS[stream.read(1)]
+            payload = payload_type.from_stream(stream)
+            random_padding = stream.read(padding_length)
+            if mac is None:
+                pack_mac = b""
+            else:
+                pack_mac = stream.read(mac.key_len)
+                # TODO: mac
+            return cls(packet_length, padding_length, payload, random_padding, pack_mac)
+        else:
+            chunk = stream.read(decryption.block_size)
+            raw_stream = BytesIO(decryption.decrypt(chunk))
+            packet_length = int.from_bytes(raw_stream.read(4), "big")
+            print(chunk, packet_length)
+            raise NotImplementedError
 
-    def to_bytes(self, encryption: Callable[[bytes], bytes] | None) -> bytes:
+    def to_bytes(self, encryption: Encryption | None) -> bytes:
         content = (
             self.packet_length.to_bytes(4, "big")
             + self.padding_length.to_bytes(1, "big")
@@ -40,12 +61,10 @@ class Packet[T: Payload](StructuredBytes):
             + self.random_padding
         )
         if encryption:
-            content = encryption(content)
+            content = encryption.encrypt(content)
         return content + self.mac
 
-    def compute_mac(
-        self, mac: proto_algorithms.mac_ctos.Algorithm, key: bytes, seq_num: int
-    ):
+    def compute_mac(self, mac: MacCtos, key: bytes, seq_num: int):
         content = (
             seq_num.to_bytes(4)
             + self.packet_length.to_bytes(4, "big")
@@ -60,7 +79,7 @@ class Packet[T: Payload](StructuredBytes):
         cls,
         payload: U,
         block_size: int | None,
-        mac: proto_algorithms.mac_ctos.Algorithm | None,
+        mac: MacCtos | None,
         key: bytes | None,
         seq_num: int | None,
     ) -> "Packet[U]":
@@ -84,202 +103,3 @@ class Packet[T: Payload](StructuredBytes):
         if mac is not None and key is not None and seq_num is not None:
             packet.mac = packet.compute_mac(mac, key, seq_num)
         return packet
-
-
-@dataclass
-class KexInit(Payload):
-    CODE = bytes([20])
-    cookie: bytes
-    name_lists: dict[str, NameList]
-    first_kex_packet_follows: bool
-    reserved: int
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> KexInit:
-        return KexInit(
-            stream.read(16),
-            {
-                field.name: NameList.from_stream(stream)
-                for field in fields(proto_algorithms.collection.AlgoCollection)
-            },
-            bool(int.from_bytes(stream.read(1), "big")),
-            int.from_bytes(stream.read(4)),
-        )
-
-    def to_bytes(self) -> bytes:
-        return (
-            self.CODE
-            + self.cookie
-            + b"".join(nl.to_bytes() for nl in self.name_lists.values())
-            + self.first_kex_packet_follows.to_bytes()
-            + self.reserved.to_bytes(4)
-        )
-
-    @classmethod
-    def build(cls) -> KexInit:
-        return KexInit(
-            secrets.token_bytes(16),
-            {
-                field.name: NameList.build(
-                    list(getattr(proto_algorithms, field.name).registry["proto_name"].keys())
-                )
-                for field in fields(AlgoCollection)
-            },
-            False,
-            0,
-        )
-
-
-@dataclass
-class KexDHInit(Payload):
-    CODE = bytes([30])
-    e: int
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase, *args, **kwargs) -> KexDHInit:
-        # the client shouldn't need to read this from stream
-        return NotImplemented
-
-    def to_bytes(self) -> bytes:
-        return self.CODE + Mpint.build(self.e).to_bytes()
-
-    @classmethod
-    def build(cls, e: int) -> KexDHInit:
-        return KexDHInit(e)
-
-
-@dataclass
-class KexDHReply(Payload):
-    CODE = bytes([31])
-    public_key: String
-    f: Mpint
-    exchange_signature: String
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> KexDHReply:
-        return KexDHReply(
-            String.from_stream(stream),
-            Mpint.from_stream(stream),
-            String.from_stream(stream),
-        )
-
-    def to_bytes(self) -> bytes:
-        return self.CODE + self.public_key + self.f + self.exchange_signature
-
-    @classmethod
-    def build(cls, *args, **kwargs) -> Self:
-        return NotImplemented
-
-
-# this is stupid
-@dataclass
-class NewKeys(Payload):
-    CODE = bytes([21])
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> NewKeys:
-        return NewKeys()
-
-    def to_bytes(self) -> bytes:
-        return self.CODE
-
-    @classmethod
-    def build(cls) -> NewKeys:
-        return NewKeys()
-
-
-@dataclass
-class Disconnect(Payload):
-    CODE = bytes([1])
-    reason_code: int
-    description: String
-    language_tag: String
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> Disconnect:
-        return Disconnect(
-            int.from_bytes(stream.read(4)),
-            String.from_stream(stream),
-            String.from_stream(stream),
-        )
-
-    def to_bytes(self) -> bytes:
-        return (
-            self.CODE
-            + self.reason_code.to_bytes(4)
-            + self.description.to_bytes()
-            + self.language_tag.to_bytes()
-        )
-
-    @classmethod
-    def build(
-        cls, reason_code: int, description: bytes, language_tag: bytes
-    ) -> Disconnect:
-        return Disconnect(
-            reason_code, String.build(description), String.build(language_tag)
-        )
-
-
-@dataclass
-class Ignore(Payload):
-    CODE = bytes([2])
-    data: String
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> Ignore:
-        return Ignore(String.from_stream(stream))
-
-    def to_bytes(self) -> bytes:
-        return self.CODE + self.data.to_bytes()
-
-    @classmethod
-    def build(cls, data: bytes) -> Ignore:
-        return Ignore(String.build(data))
-
-
-@dataclass
-class Debug(Payload):
-    CODE = bytes([4])
-    always_display: bool
-    message: String
-    language_tag: String
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> Debug:
-        return Debug(
-            bool(stream.read(1)), String.from_stream(stream), String.from_stream(stream)
-        )
-
-    def to_bytes(self) -> bytes:
-        return (
-            self.CODE
-            + self.always_display.to_bytes()
-            + self.message
-            + self.language_tag
-        )
-
-    @classmethod
-    def build(cls, always_display: bool, message: bytes, language_tag: bytes) -> Debug:
-        return Debug(always_display, String.build(message), String.build(language_tag))
-
-
-@dataclass
-class Unimplemented(Payload):
-    CODE = bytes([3])
-    sequence_number: int
-
-    @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> Unimplemented:
-        return Unimplemented(int.from_bytes(stream.read(4)))
-
-    def to_bytes(self) -> bytes:
-        return self.CODE + self.sequence_number.to_bytes(4)
-
-    @classmethod
-    def build(cls, sequence_number: int) -> Unimplemented:
-        return Unimplemented(sequence_number)
-
-
-PAYLOADS = {}
-for cls in Payload.__subclasses__():
-    PAYLOADS[cls.CODE] = cls

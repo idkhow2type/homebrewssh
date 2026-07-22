@@ -44,16 +44,16 @@ class String(StructuredBytes):
     data: bytes
 
     @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> String:
+    def from_stream(cls, stream: BufferedIOBase) -> Self:
         length = int.from_bytes(stream.read(4))
-        return String(length, stream.read(length))
+        return cls(length, stream.read(length))
 
     def to_bytes(self) -> bytes:
         return self.length.to_bytes(4) + self.data
 
     @classmethod
-    def build(cls, data: bytes) -> String:
-        return String(len(data), data)
+    def build(cls, data: bytes) -> Self:
+        return cls(len(data), data)
 
 
 @dataclass
@@ -61,9 +61,9 @@ class Mpint(StructuredBytes):
     num: int
 
     @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> "Mpint":
+    def from_stream(cls, stream: BufferedIOBase) -> Self:
         string = String.from_stream(stream)
-        return Mpint(int.from_bytes(string.data, "big", signed=True))
+        return cls(int.from_bytes(string.data, "big", signed=True))
 
     def to_bytes(self) -> bytes:
         if self.num == 0:
@@ -84,8 +84,8 @@ class Mpint(StructuredBytes):
         return String(len(data), data).to_bytes()
 
     @classmethod
-    def build(cls, num: int) -> "Mpint":
-        return Mpint(num)
+    def build(cls, num: int) -> Self:
+        return cls(num)
 
 
 @dataclass
@@ -94,15 +94,15 @@ class NameList(StructuredBytes):
     names: list[bytes]
 
     @classmethod
-    def from_stream(cls, stream: BufferedIOBase) -> "NameList":
+    def from_stream(cls, stream: BufferedIOBase) -> Self:
         length = int.from_bytes(stream.read(4), "big")
         names = stream.read(length).split(b",") if length else []
-        return NameList(length, names)
+        return cls(length, names)
 
     def to_bytes(self) -> bytes:
         return self.length.to_bytes(4, "big") + b",".join(self.names)
 
     @classmethod
-    def build(cls, names: list[bytes]) -> "NameList":
+    def build(cls, names: list[bytes]) -> Self:
         data = b",".join(names)
-        return NameList(len(data), names)
+        return cls(len(data), names)

@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 
 if TYPE_CHECKING:
-    from messages.packet import KexInit
+    from messages.kex import KexInit
     import proto_algorithms
 
 
@@ -24,13 +24,13 @@ class AlgoCollection:
     kex: proto_algorithms.kex.Algorithm
     server_host_key: proto_algorithms.server_host_key.Algorithm
     encryption_ctos: proto_algorithms.encryption_ctos.Algorithm
-    encryption_stoc: proto_algorithms.encryption_ctos.Algorithm
+    encryption_stoc: proto_algorithms.encryption_stoc.Algorithm
     mac_ctos: proto_algorithms.mac_ctos.Algorithm
-    mac_stoc: proto_algorithms.mac_ctos.Algorithm
+    mac_stoc: proto_algorithms.mac_stoc.Algorithm
     compression_ctos: proto_algorithms.compression_ctos.Algorithm
-    compression_stoc: proto_algorithms.compression_ctos.Algorithm
+    compression_stoc: proto_algorithms.compression_stoc.Algorithm
     languages_ctos: proto_algorithms.languages_ctos.Algorithm
-    languages_stoc: proto_algorithms.languages_ctos.Algorithm
+    languages_stoc: proto_algorithms.languages_stoc.Algorithm
 
     def __init__(self, client_payload: KexInit, server_payload: KexInit) -> None:
         import proto_algorithms
