@@ -22,6 +22,12 @@ class Payload(StructuredBytes, ABC):
         PAYLOADS[cls.CODE] = cls
 
 
+class PacketError(Exception):
+    def __init__(self, message: str, code: int) -> None:
+        self.code = code
+        self.message = message
+
+
 @dataclass
 class Packet[T: Payload](StructuredBytes):
     packet_length: int
@@ -64,7 +70,8 @@ class Packet[T: Payload](StructuredBytes):
         packet = cls(packet_length, padding_length, payload, random_padding, b"")
         if mac and mac.key and seq_num is not None:
             actual_mac = packet.compute_mac(mac, seq_num)
-            assert pack_mac == actual_mac
+            if pack_mac != actual_mac:
+                raise PacketError("Corrupted MAC",5)
         return packet
 
     def to_bytes(self, encryption: Encryption | None) -> bytes:

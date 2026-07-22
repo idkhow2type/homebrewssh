@@ -1,5 +1,5 @@
 from registry import Registry
-from typing import Protocol, TYPE_CHECKING, Callable
+from typing import Protocol, TYPE_CHECKING, Callable, cast
 from dataclasses import dataclass
 import secrets
 from hashlib import sha256 as _sha256
@@ -68,7 +68,7 @@ def dh_g14_sha256(server: Server[AlgoCollection]):
     e = pow_mod(g, x, p)
 
     server.send(KexDHInit.build(e))
-    server_payload = server.recv(KexDHReply)
+    server_payload = cast(KexDHReply,server.recv())
 
     # TODO: check if public key is valid
 

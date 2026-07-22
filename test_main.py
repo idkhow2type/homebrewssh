@@ -216,7 +216,7 @@ class IntegrationTests(unittest.TestCase):
 
             # 3. Exchange NewKeys
             client.send(NewKeys.build())
-            client.recv(NewKeys)
+            client.recv()
 
             # Verify keys were derived
             self.assertIsNotNone(client.encryption_key_ctos)

@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import cast, overload
+from typing import cast, overload, Callable, Any
 import socket
 from io import BytesIO
 import sys
 
-from messages.packet import Packet, Payload, Mpint
+from messages.primitives import Mpint
+from messages.packet import Packet, Payload, PacketError
 from messages.kex import KexInit, NewKeys
 from messages.misc import Disconnect, Ignore, Unimplemented, Debug
 from messages.auth import UserAuthRequest_None
@@ -53,6 +54,9 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.client_seq_num = 0
         self.server_seq_num = 0
 
+        self.payload_handlers: list[Callable[[Server[Any], Payload]]] = []
+        self.packet_error_handlers: list[Callable[[Server[Any], PacketError]]] = []
+
     def connect(self):
         self.socket.connect((self.host, self.port))
         self.sock_file = self.socket.makefile("rb")
@@ -73,7 +77,7 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.socket.sendall(self.client_meta.ident_string + b"\r\n")
 
     def negotiate_algos(self) -> Server[AlgoCollection]:
-        server_payload = self.recv(KexInit)
+        server_payload = cast(KexInit, self.recv())
         client_payload = KexInit.build()
         self.send(client_payload)
         self.I_C = client_payload
@@ -82,13 +86,7 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.algos = cast(T, AlgoCollection(client_payload, server_payload))
         return cast(Server[AlgoCollection], self)
 
-    @overload
-    def disconnect(self): ...
-    @overload
-    def disconnect(self, payload: None): ...
-    @overload
-    def disconnect(self, payload: Disconnect): ...
-    def disconnect(self, payload=None):
+    def disconnect(self, payload: Disconnect | None = None):
         # imagine having to free in a gc language
         self.send(payload or Disconnect.build(11, b"Closing connection", b""))
         if self.sock_file:
@@ -109,49 +107,61 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.socket.sendall(packet)
         self.client_seq_num += 1
 
-    @overload
-    def recv(self) -> Payload: ...
-    @overload
-    def recv(self, payload_type: None) -> Payload: ...
-    @overload
-    def recv[U: Payload](self, payload_type: type[U]) -> U: ...
-    def recv(self, payload_type=None):
+    def recv(self):
         if not self.sock_file:
             raise RuntimeError("Socket stream is not initialized")
 
-        payload = Packet.from_stream(
-            self.sock_file,
-            self.algos.encryption_stoc,
-            self.algos.mac_stoc,
-            self.server_seq_num,
-        ).payload
+        payload = None
+        try:
+            payload = Packet.from_stream(
+                self.sock_file,
+                self.algos.encryption_stoc,
+                self.algos.mac_stoc,
+                self.server_seq_num,
+            ).payload
+        except PacketError as e:
+            for handler in self.packet_error_handlers:
+                handler(self, e)
 
-        match payload.CODE:
-            case Disconnect.CODE:
-                payload = cast(Disconnect, payload)
-                sys.stdout.buffer.write(payload.description.data)
-                server.disconnect()
-            case Ignore.CODE:
-                pass
-            case Unimplemented.CODE:
-                pass
-            case Debug.CODE:
-                payload = cast(Debug, payload)
-                sys.stdout.buffer.write(payload.message.data)
+        if payload:
+            for handler in self.payload_handlers:
+                handler(self, payload)
+
         self.server_seq_num += 1
-        if payload_type and not isinstance(payload, payload_type):
-            raise RuntimeError("Unexpected payload: ", payload)
         return payload
+
+
+def misc_payload(server: Server[Any], payload: Payload):
+    match payload.CODE:
+        case Disconnect.CODE:
+            payload = cast(Disconnect, payload)
+            sys.stdout.buffer.write(payload.description.data)
+            server.disconnect()
+        case Ignore.CODE:
+            pass
+        case Unimplemented.CODE:
+            pass
+        case Debug.CODE:
+            payload = cast(Debug, payload)
+            sys.stdout.buffer.write(payload.message.data)
+
+
+def packet_error(server: Server[Any], e: PacketError):
+    match e.code:
+        case 5:
+            server.disconnect(Disconnect.build(5, b"Corrupted MAC", b""))
 
 
 if __name__ == "__main__":
     server = Server("127.0.0.1", int(sys.argv[1]) if len(sys.argv) >= 2 else 22)
+    server.payload_handlers.append(misc_payload)
+    server.packet_error_handlers.append(packet_error)
+
     server.connect()
     server = server.negotiate_algos()
-    assert server.sock_file
     server.algos.kex(server)
     server.send(NewKeys.build())
-    server.recv(NewKeys)
+    server.recv()
 
     server.algos.encryption_ctos.setup(server.encryption_key_ctos, server.IV_ctos)
     server.algos.encryption_stoc.setup(server.encryption_key_stoc, server.IV_stoc)
@@ -160,7 +170,5 @@ if __name__ == "__main__":
 
     server.send(UserAuthRequest_None.build(b"idkhow2type"))
     print(server.recv())
-    # print(server.algos.mac_stoc.key_len)
-    # print(len(server.sock_file.read(16+server.algos.mac_stoc.key_len)))
 
     server.disconnect()
