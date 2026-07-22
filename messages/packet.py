@@ -1,7 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass
 from typing import ClassVar
-from io import BufferedIOBase, BytesIO
+from io import BufferedIOBase, BytesIO, SEEK_END
 import secrets
 
 from .primitives import *
@@ -10,7 +10,7 @@ from proto_algorithms.encryption_stoc import Algorithm as Decryption
 from proto_algorithms.mac_ctos import Algorithm as MacCtos
 from proto_algorithms.mac_stoc import Algorithm as MacStoc
 
-PAYLOADS = {}
+PAYLOADS: dict[bytes, type[Payload]] = {}
 
 
 @dataclass
@@ -32,26 +32,40 @@ class Packet[T: Payload](StructuredBytes):
 
     @classmethod
     def from_stream(
-        cls, stream: BufferedIOBase, decryption: Decryption | None, mac: MacStoc | None
+        cls,
+        stream: BufferedIOBase,
+        decryption: Decryption | None,
+        mac: MacStoc | None,
+        seq_num: int | None,
     ) -> Self:
-        if decryption is None:
+        if decryption is None or decryption._cipher is None:
             packet_length = int.from_bytes(stream.read(4), "big")
-            padding_length = int.from_bytes(stream.read(1), "big")
-            payload_type = PAYLOADS[stream.read(1)]
-            payload = payload_type.from_stream(stream)
-            random_padding = stream.read(padding_length)
-            if mac is None:
-                pack_mac = b""
-            else:
-                pack_mac = stream.read(mac.key_len)
-                # TODO: mac
-            return cls(packet_length, padding_length, payload, random_padding, pack_mac)
+            raw_stream = stream
         else:
             chunk = stream.read(decryption.block_size)
             raw_stream = BytesIO(decryption.decrypt(chunk))
+
             packet_length = int.from_bytes(raw_stream.read(4), "big")
-            print(chunk, packet_length)
-            raise NotImplementedError
+
+            leftover = stream.read(4 + packet_length - decryption.block_size)
+            read_pos = raw_stream.tell()
+            raw_stream.seek(0, SEEK_END)
+            if leftover:
+                raw_stream.write(decryption.decrypt(leftover))
+            raw_stream.write(stream.read(mac.key_len if mac and mac.key else 0))
+            raw_stream.seek(read_pos)
+
+        padding_length = int.from_bytes(raw_stream.read(1), "big")
+        payload_type = cast(type[T], PAYLOADS[raw_stream.read(1)])
+        payload = payload_type.from_stream(raw_stream)
+        random_padding = raw_stream.read(padding_length)
+        pack_mac = raw_stream.read(mac.key_len if mac and mac.key else 0)
+
+        packet = cls(packet_length, padding_length, payload, random_padding, b"")
+        if mac and mac.key and seq_num is not None:
+            actual_mac = packet.compute_mac(mac, seq_num)
+            assert pack_mac == actual_mac
+        return packet
 
     def to_bytes(self, encryption: Encryption | None) -> bytes:
         content = (
@@ -60,11 +74,11 @@ class Packet[T: Payload](StructuredBytes):
             + self.payload.to_bytes()
             + self.random_padding
         )
-        if encryption:
+        if encryption and encryption._cipher:
             content = encryption.encrypt(content)
         return content + self.mac
 
-    def compute_mac(self, mac: MacCtos, key: bytes, seq_num: int):
+    def compute_mac(self, mac: MacCtos | MacStoc, seq_num: int):
         content = (
             seq_num.to_bytes(4)
             + self.packet_length.to_bytes(4, "big")
@@ -72,7 +86,7 @@ class Packet[T: Payload](StructuredBytes):
             + self.payload.to_bytes()
             + self.random_padding
         )
-        return mac(content, key)
+        return mac.compute(content)
 
     @classmethod
     def build[U: Payload](
@@ -80,7 +94,6 @@ class Packet[T: Payload](StructuredBytes):
         payload: U,
         block_size: int | None,
         mac: MacCtos | None,
-        key: bytes | None,
         seq_num: int | None,
     ) -> "Packet[U]":
         # TODO: store structuredbytes size instead of doing this
@@ -100,6 +113,6 @@ class Packet[T: Payload](StructuredBytes):
             secrets.token_bytes(padding_length),
             b"",
         )
-        if mac is not None and key is not None and seq_num is not None:
-            packet.mac = packet.compute_mac(mac, key, seq_num)
+        if mac is not None and mac.key and seq_num is not None:
+            packet.mac = packet.compute_mac(mac, seq_num)
         return packet

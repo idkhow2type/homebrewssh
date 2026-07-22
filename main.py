@@ -96,16 +96,16 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.socket.close()
 
     def send(self, payload: Payload):
-        if self.algos.encryption_ctos and self.algos.encryption_ctos._cipher:
-            packet = Packet.build(
-                payload,
-                self.algos.encryption_ctos.block_size,
-                self.algos.mac_ctos,
-                self.integrity_key_ctos,
-                self.client_seq_num,
-            ).to_bytes(self.algos.encryption_ctos)
-        else:
-            packet = Packet.build(payload, None, None, None, None).to_bytes(None)
+        packet = Packet.build(
+            payload,
+            (
+                self.algos.encryption_ctos.block_size
+                if self.algos.encryption_ctos
+                else None
+            ),
+            self.algos.mac_ctos,
+            self.client_seq_num,
+        ).to_bytes(self.algos.encryption_ctos)
         self.socket.sendall(packet)
         self.client_seq_num += 1
 
@@ -119,12 +119,12 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         if not self.sock_file:
             raise RuntimeError("Socket stream is not initialized")
 
-        if self.algos.encryption_stoc and self.algos.encryption_stoc._cipher:
-            payload = Packet.from_stream(
-                self.sock_file, self.algos.encryption_stoc, self.algos.mac_stoc
-            ).payload
-        else:
-            payload = Packet.from_stream(self.sock_file, None, None).payload
+        payload = Packet.from_stream(
+            self.sock_file,
+            self.algos.encryption_stoc,
+            self.algos.mac_stoc,
+            self.server_seq_num,
+        ).payload
 
         match payload.CODE:
             case Disconnect.CODE:
@@ -139,25 +139,28 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
                 payload = cast(Debug, payload)
                 sys.stdout.buffer.write(payload.message.data)
         self.server_seq_num += 1
-        if payload_type and isinstance(payload, payload_type):
-            return payload
-        else:
+        if payload_type and not isinstance(payload, payload_type):
             raise RuntimeError("Unexpected payload: ", payload)
+        return payload
 
 
 if __name__ == "__main__":
     server = Server("127.0.0.1", int(sys.argv[1]) if len(sys.argv) >= 2 else 22)
     server.connect()
     server = server.negotiate_algos()
+    assert server.sock_file
     server.algos.kex(server)
     server.send(NewKeys.build())
+    server.recv(NewKeys)
 
     server.algos.encryption_ctos.setup(server.encryption_key_ctos, server.IV_ctos)
     server.algos.encryption_stoc.setup(server.encryption_key_stoc, server.IV_stoc)
+    server.algos.mac_ctos.setup(server.integrity_key_ctos)
+    server.algos.mac_stoc.setup(server.integrity_key_stoc)
 
     server.send(UserAuthRequest_None.build(b"idkhow2type"))
-    assert server.sock_file is not None
-    print(server.socket.recv(1024))
-    # print(server.recv())
+    print(server.recv())
+    # print(server.algos.mac_stoc.key_len)
+    # print(len(server.sock_file.read(16+server.algos.mac_stoc.key_len)))
 
     server.disconnect()

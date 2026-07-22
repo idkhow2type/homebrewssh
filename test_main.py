@@ -95,12 +95,12 @@ class PacketTests(unittest.TestCase):
         # Using KexInit as the payload
         payload = KexInit.build()
         packet = Packet.build(
-            payload=payload, block_size=8, mac=None, key=None, seq_num=None
+            payload=payload, block_size=8, mac=None, seq_num=None
         )
 
         raw = packet.to_bytes(encryption=None)
         # Packet.from_stream requires mac_length. If mac is empty, length is 0.
-        restored = Packet.from_stream(BytesIO(raw), None, None)
+        restored = Packet.from_stream(BytesIO(raw), None, None, None)
 
         self.assertEqual(restored.packet_length, packet.packet_length)
         self.assertEqual(restored.padding_length, packet.padding_length)

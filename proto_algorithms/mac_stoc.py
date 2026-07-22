@@ -1,14 +1,20 @@
 from registry import Registry
 from typing import Protocol
+from abc import abstractmethod
 from dataclasses import dataclass
 from hashlib import sha1
 import hmac
 
 
-class InputFunc(Protocol):
-    __name__: str
+class Mac(type):
+    key: bytes=b''
 
-    def __call__(self, data: bytes, key: bytes) -> bytes: ...
+    @classmethod
+    @abstractmethod
+    def setup(cls, key: bytes) -> None: ...
+    @classmethod
+    @abstractmethod
+    def compute(cls, data: bytes) -> bytes: ...
 
 
 @dataclass
@@ -17,14 +23,19 @@ class Metadata:
     key_len: int
 
 
-class Algorithm(InputFunc, Metadata):
+class Algorithm(Mac, Metadata):
     pass
 
 
-registry: Registry[InputFunc, Algorithm, Metadata] = Registry()
+registry: Registry[Mac, Algorithm, Metadata] = Registry()
 
 
 @registry.register(Metadata(proto_name=b"hmac-sha1", key_len=20))
-def hmac_sha1(data: bytes, key: bytes) -> bytes:
-    hmac_obj = hmac.new(key, data, sha1)
-    return hmac_obj.digest()
+class hmac_sha1(metaclass=Mac):
+    @classmethod
+    def setup(cls, key: bytes) -> None:
+        cls.key = key
+
+    @classmethod
+    def compute(cls, data: bytes) -> bytes:
+        return hmac.new(cls.key, data, sha1).digest()
