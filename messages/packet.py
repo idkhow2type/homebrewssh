@@ -10,6 +10,9 @@ from proto_algorithms.encryption_stoc import Algorithm as Decryption
 from proto_algorithms.mac_ctos import Algorithm as MacCtos
 from proto_algorithms.mac_stoc import Algorithm as MacStoc
 
+import hmac
+from hashlib import sha256
+
 PAYLOADS: dict[bytes, type[Payload]] = {}
 
 
@@ -71,7 +74,8 @@ class Packet[T: Payload](StructuredBytes):
         if mac and mac.key and seq_num is not None:
             actual_mac = packet.compute_mac(mac, seq_num)
             if pack_mac != actual_mac:
-                raise PacketError("Corrupted MAC",5)
+                raise PacketError("Corrupted MAC", 5)
+            packet.mac = pack_mac
         return packet
 
     def to_bytes(self, encryption: Encryption | None) -> bytes:

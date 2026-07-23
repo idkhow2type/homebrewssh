@@ -7,8 +7,15 @@ import sys
 from messages.primitives import Mpint
 from messages.packet import Packet, Payload, PacketError
 from messages.kex import KexInit, NewKeys
-from messages.misc import Disconnect, Ignore, Unimplemented, Debug
-from messages.auth import UserAuthRequest_None
+from messages.misc import (
+    Disconnect,
+    Ignore,
+    Unimplemented,
+    Debug,
+    ServiceRequest,
+    ServiceAccept,
+)
+from messages.auth import UserAuthRequest_None, UserAuthRequest_Publickey
 
 from stream_readers import consume_until, require
 from proto_algorithms.collection import AlgoCollection, DefaultAlgoCollection
@@ -57,6 +64,12 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.payload_handlers: list[Callable[[Server[Any], Payload]]] = []
         self.packet_error_handlers: list[Callable[[Server[Any], PacketError]]] = []
 
+    def write_keylog(self, filename="keylog"):
+        with open(filename, "w") as f:
+            cookie = self.I_S.cookie.hex()
+            shared_secret = self.K.to_bytes()[(4 + 0) :].hex()
+            f.write(f"{cookie} SHARED_SECRET {shared_secret}\n")
+
     def connect(self):
         self.socket.connect((self.host, self.port))
         self.sock_file = self.socket.makefile("rb")
@@ -87,11 +100,13 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         return cast(Server[AlgoCollection], self)
 
     def disconnect(self, payload: Disconnect | None = None):
+
         # imagine having to free in a gc language
-        self.send(payload or Disconnect.build(11, b"Closing connection", b""))
         if self.sock_file:
             self.sock_file.close()
-        self.socket.close()
+        if not self.socket._closed:
+            self.send(payload or Disconnect.build(11, b"Closing connection", b""))
+            self.socket.close()
 
     def send(self, payload: Payload):
         packet = Packet.build(
@@ -107,7 +122,7 @@ class Server[T: AlgoCollection | DefaultAlgoCollection = DefaultAlgoCollection]:
         self.socket.sendall(packet)
         self.client_seq_num += 1
 
-    def recv(self):
+    def recv(self) -> Payload | None:
         if not self.sock_file:
             raise RuntimeError("Socket stream is not initialized")
 
@@ -160,15 +175,22 @@ if __name__ == "__main__":
     server.connect()
     server = server.negotiate_algos()
     server.algos.kex(server)
+    server.write_keylog()
     server.send(NewKeys.build())
-    server.recv()
+    print(server.recv())
 
     server.algos.encryption_ctos.setup(server.encryption_key_ctos, server.IV_ctos)
     server.algos.encryption_stoc.setup(server.encryption_key_stoc, server.IV_stoc)
     server.algos.mac_ctos.setup(server.integrity_key_ctos)
     server.algos.mac_stoc.setup(server.integrity_key_stoc)
 
-    server.send(UserAuthRequest_None.build(b"idkhow2type"))
+    assert server.sock_file
+
+    server.send(ServiceRequest.build(b"ssh-userauth"))
     print(server.recv())
+    server.send(UserAuthRequest_None.build(b"idkhow2type"))
+    input()
+    payload = server.recv()
+    # print(payload)
 
     server.disconnect()

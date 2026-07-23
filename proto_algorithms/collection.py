@@ -45,3 +45,4 @@ class AlgoCollection:
                             algo
                         ],
                     )
+                    break

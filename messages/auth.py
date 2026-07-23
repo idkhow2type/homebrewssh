@@ -67,21 +67,19 @@ class UserAuthRequest_Publickey(UserAuthRequest):
             String.build(signature),
         )
 
+
 @dataclass
 class UserAuthFailure(Payload):
-    CODE=bytes([51])
+    CODE = bytes([51])
     supported_methods: NameList
     partial_success: bool
 
     @classmethod
     def from_stream(cls, stream: BufferedIOBase) -> Self:
-        return cls(
-            NameList.from_stream(stream),
-            bool.from_bytes(stream.read(1))
-        )
+        return cls(NameList.from_stream(stream), bool.from_bytes(stream.read(1)))
 
     def to_bytes(self) -> bytes:
-        return self.supported_methods+self.partial_success.to_bytes()
+        return self.CODE + self.supported_methods + self.partial_success.to_bytes()
 
     @classmethod
     def build(cls) -> Self:

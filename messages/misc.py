@@ -4,6 +4,7 @@ from io import BufferedIOBase
 from .primitives import *
 from .packet import Payload
 
+
 @dataclass
 class Disconnect(Payload):
     CODE = bytes([1])
@@ -28,12 +29,8 @@ class Disconnect(Payload):
         )
 
     @classmethod
-    def build(
-        cls, reason_code: int, description: bytes, language_tag: bytes
-    ) -> Self:
-        return cls(
-            reason_code, String.build(description), String.build(language_tag)
-        )
+    def build(cls, reason_code: int, description: bytes, language_tag: bytes) -> Self:
+        return cls(reason_code, String.build(description), String.build(language_tag))
 
 
 @dataclass
@@ -94,3 +91,36 @@ class Unimplemented(Payload):
     @classmethod
     def build(cls, sequence_number: int) -> Self:
         return cls(sequence_number)
+
+
+@dataclass
+class ServiceRequest(Payload):
+    CODE = bytes([5])
+    service_name: String
+
+    @classmethod
+    def from_stream(cls, stream: BufferedIOBase) -> Self:
+        return cls(String.from_stream(stream))
+
+    def to_bytes(self) -> bytes:
+        return self.CODE + self.service_name
+
+    @classmethod
+    def build(cls, service_name: bytes) -> Self:
+        return cls(String.build(service_name))
+    
+@dataclass
+class ServiceAccept(Payload):
+    CODE = bytes([6])
+    service_name: String
+
+    @classmethod
+    def from_stream(cls, stream: BufferedIOBase) -> Self:
+        return cls(String.from_stream(stream))
+
+    def to_bytes(self) -> bytes:
+        return self.CODE + self.service_name
+
+    @classmethod
+    def build(cls, service_name: bytes) -> Self:
+        return cls(String.build(service_name))
